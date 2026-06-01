@@ -33,7 +33,7 @@ func main() {
 		line = strings.TrimSpace(line)
 
 		if line == "exit" {
-			fmt.Println("Выход.")
+			fmt.Println("Exiting")
 			break
 		}
 
