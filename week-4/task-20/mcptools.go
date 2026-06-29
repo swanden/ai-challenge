@@ -14,28 +14,39 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ServerSpec — один MCP-сервер: логическое имя + команда запуска.
+// ServerSpec — один MCP-сервер: логическое имя + назначение + команда запуска.
 type ServerSpec struct {
-	Name string
-	Cmd  []string
+	Name    string
+	Purpose string // короткое назначение для каталога (ленивый режим)
+	Cmd     []string
 }
+
+// LoadToolsName — имя мета-тула ленивой загрузки схем (обрабатывается агентом, не сервером).
+const LoadToolsName = "load_tools"
 
 // MCPTools — день 20: подключение к НЕСКОЛЬКИМ MCP-серверам, агрегация их тулов
 // и МАРШРУТИЗАЦИЯ вызова по имени тула к серверу-владельцу.
 type MCPTools struct {
-	tools    []anthropic.ToolUnionParam    // объединённый список для модели
+	tools    []anthropic.ToolUnionParam    // объединённый список для модели (жадный режим)
 	route    map[string]*mcp.ClientSession // имя тула -> сессия владельца
 	origin   map[string]string             // имя тула -> имя сервера (для вывода)
-	byServer map[string][]string           // сервер -> его тулы
+	byServer map[string][]string           // сервер -> его тулы (имена)
+
+	// для ленивого режима (день 20, усиление):
+	toolsByServer map[string][]anthropic.ToolUnionParam // сервер -> его тулы (схемы)
+	purpose       map[string]string                     // сервер -> назначение (для каталога)
+	serverOrder   []string                              // порядок серверов (детерминированный)
 }
 
 // ConnectMCP поднимает все указанные серверы (stdio-сабпроцессы), собирает их тулы
 // в общий список и строит таблицу маршрутизации. Возвращает реестр и stop-функцию.
 func ConnectMCP(ctx context.Context, servers []ServerSpec) (*MCPTools, func(), error) {
 	m := &MCPTools{
-		route:    map[string]*mcp.ClientSession{},
-		origin:   map[string]string{},
-		byServer: map[string][]string{},
+		route:         map[string]*mcp.ClientSession{},
+		origin:        map[string]string{},
+		byServer:      map[string][]string{},
+		toolsByServer: map[string][]anthropic.ToolUnionParam{},
+		purpose:       map[string]string{},
 	}
 	var stops []func()
 	stopAll := func() {
@@ -45,6 +56,8 @@ func ConnectMCP(ctx context.Context, servers []ServerSpec) (*MCPTools, func(), e
 	}
 
 	for _, spec := range servers {
+		m.serverOrder = append(m.serverOrder, spec.Name)
+		m.purpose[spec.Name] = spec.Purpose
 		client := mcp.NewClient(&mcp.Implementation{Name: "day20-agent", Version: "0.1.0"}, nil)
 		cmd := exec.CommandContext(ctx, spec.Cmd[0], spec.Cmd[1:]...)
 
@@ -85,7 +98,9 @@ func ConnectMCP(ctx context.Context, servers []ServerSpec) (*MCPTools, func(), e
 				fmt.Printf("[mcp] предупреждение: тул %q есть на нескольких серверах; беру %q\n", t.Name, m.origin[t.Name])
 				continue
 			}
-			m.tools = append(m.tools, oneTool(t))
+			tool := oneTool(t)
+			m.tools = append(m.tools, tool)
+			m.toolsByServer[spec.Name] = append(m.toolsByServer[spec.Name], tool)
 			m.route[t.Name] = session
 			m.origin[t.Name] = spec.Name
 			m.byServer[spec.Name] = append(m.byServer[spec.Name], t.Name)
@@ -96,6 +111,64 @@ func ConnectMCP(ctx context.Context, servers []ServerSpec) (*MCPTools, func(), e
 
 func (m *MCPTools) Tools() []anthropic.ToolUnionParam { return m.tools }
 func (m *MCPTools) Len() int                          { return len(m.tools) }
+
+// CatalogTools — стартовый набор для ЛЕНИВОГО режима: один мета-тул load_tools,
+// в описании которого перечислены серверы и их назначение, но БЕЗ полных схем их тулов.
+// Это и есть «каталог серверов», с которого начинает модель (экономия токенов).
+func (m *MCPTools) CatalogTools() []anthropic.ToolUnionParam {
+	var lines []string
+	enum := make([]any, 0, len(m.serverOrder))
+	for _, s := range m.serverOrder {
+		lines = append(lines, fmt.Sprintf("%q — %s (тулов: %d)", s, m.purpose[s], len(m.toolsByServer[s])))
+		enum = append(enum, s)
+	}
+	desc := "Загрузить инструменты одного MCP-сервера ПЕРЕД их использованием. " +
+		"Сначала загрузи сервер, подходящий под задачу, затем вызывай его тулы. " +
+		"Доступные серверы: " + strings.Join(lines, "; ") + "."
+	tp := anthropic.ToolParam{
+		Name:        LoadToolsName,
+		Description: anthropic.String(desc),
+		InputSchema: anthropic.ToolInputSchemaParam{
+			Properties: map[string]any{
+				"server": map[string]any{"type": "string", "enum": enum, "description": "Имя сервера из каталога"},
+			},
+			Required: []string{"server"},
+		},
+	}
+	return []anthropic.ToolUnionParam{{OfTool: &tp}}
+}
+
+// LoadServer возвращает схемы тулов запрошенного сервера (для подмешивания в запрос)
+// и текстовое подтверждение для модели. Вызывается, когда модель дёрнула load_tools.
+func (m *MCPTools) LoadServer(input json.RawMessage) ([]anthropic.ToolUnionParam, string) {
+	var in struct {
+		Server string `json:"server"`
+	}
+	_ = json.Unmarshal(input, &in)
+	tools, ok := m.toolsByServer[in.Server]
+	if !ok {
+		return nil, fmt.Sprintf("нет сервера %q; доступны: %s", in.Server, strings.Join(m.serverOrder, ", "))
+	}
+	return tools, fmt.Sprintf("загружены инструменты сервера %q: %s. Теперь можешь их вызывать.",
+		in.Server, strings.Join(m.byServer[in.Server], ", "))
+}
+
+// appendNewTools добавляет тулы, которых ещё нет (дедуп по имени).
+func appendNewTools(existing, added []anthropic.ToolUnionParam) []anthropic.ToolUnionParam {
+	have := map[string]bool{}
+	for _, t := range existing {
+		if t.OfTool != nil {
+			have[t.OfTool.Name] = true
+		}
+	}
+	for _, t := range added {
+		if t.OfTool != nil && !have[t.OfTool.Name] {
+			existing = append(existing, t)
+			have[t.OfTool.Name] = true
+		}
+	}
+	return existing
+}
 
 // Names — все тулы, отсортированно (для стартового вывода).
 func (m *MCPTools) Names() []string {

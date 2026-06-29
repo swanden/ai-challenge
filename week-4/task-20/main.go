@@ -47,6 +47,7 @@ func main() {
 	watchSec := flag.Int("watch", 0, "день 18: режим 24/7 — печатать сводку каждые N сек (0 = обычный REPL)")
 	track := flag.String("track", "Berlin,Sofia", "watch: города через запятую для фонового сбора")
 	interval := flag.Int("interval", 30, "watch: период фонового сбора на сервере, сек")
+	lazy := flag.Bool("lazy", true, "день 20: ленивая загрузка схем тулов (каталог серверов → load_tools). false = слать все схемы сразу")
 	flag.Parse()
 
 	if err := godotenv.Load(); err != nil {
@@ -81,8 +82,10 @@ func main() {
 	// День 17: инструменты доступны агенту всегда, вызовы проходят через инварианты.
 	// День 20: оркестрация НЕСКОЛЬКИХ MCP-серверов разной природы.
 	servers := []ServerSpec{
-		{Name: "weather", Cmd: []string{"go", "run", filepath.Join(sourceDir(), "weatherserver")}},
-		{Name: "notes", Cmd: []string{"go", "run", filepath.Join(sourceDir(), "notesserver")}},
+		{Name: "weather", Purpose: "погода, геокодинг, фоновое слежение за городами",
+			Cmd: []string{"go", "run", filepath.Join(sourceDir(), "weatherserver")}},
+		{Name: "notes", Purpose: "файловое хранилище: сохранить/прочитать/список/удалить",
+			Cmd: []string{"go", "run", filepath.Join(sourceDir(), "notesserver")}},
 	}
 	mcptools, mcpStop, err := ConnectMCP(ctx, servers)
 	if err != nil {
@@ -90,7 +93,13 @@ func main() {
 	} else {
 		defer mcpStop()
 		agent.SetMCP(mcptools)
-		fmt.Printf("MCP: %d тул(ов) с %d серверов\n  %s\n", mcptools.Len(), 2, mcptools.Breakdown())
+		agent.SetLazyTools(*lazy)
+		mode := "жадный (все схемы сразу)"
+		if *lazy {
+			mode = "ленивый (каталог серверов → load_tools)"
+		}
+		fmt.Printf("MCP: %d тул(ов) с %d серверов · режим схем: %s\n  %s\n",
+			mcptools.Len(), 2, mode, mcptools.Breakdown())
 	}
 
 	// День 18: режим 24/7. Агент ставит города на фоновый сбор и периодически

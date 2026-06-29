@@ -34,6 +34,7 @@ type Agent struct {
 	inv       *InvariantSet
 	llmCheck  bool      // включает семантическую проверку (способ 2)
 	mcp       *MCPTools // день 17: MCP-инструменты, доступны агенту всегда (если подключены)
+	lazyTools bool      // день 20 (усиление): ленивая загрузка схем тулов по серверам
 }
 
 // maxToolRounds — потолок раундов tool-use на один Ask (защита от зацикливания,
@@ -55,6 +56,10 @@ func (a *Agent) SetLLMCheck(on bool)             { a.llmCheck = on }
 // SetMCP подключает MCP-инструменты к агенту (день 17). Если задано — список
 // инструментов кладётся в каждый запрос, и модель может их вызывать (tool-use).
 func (a *Agent) SetMCP(m *MCPTools) { a.mcp = m }
+
+// SetLazyTools включает ленивую загрузку схем (день 20, усиление): старт с каталога
+// серверов, схемы тулов сервера подмешиваются только после load_tools.
+func (a *Agent) SetLazyTools(on bool) { a.lazyTools = on }
 func (a *Agent) SetMaxTokens(n int64) {
 	if n > 0 {
 		a.maxTokens = n
@@ -113,7 +118,11 @@ func (a *Agent) ask(ctx context.Context, query string, p Policy, store bool) (Re
 		Model: a.model, MaxTokens: a.maxTokens, System: system, Messages: msgs,
 	}
 	if a.mcp != nil {
-		params.Tools = a.mcp.Tools() // инструменты доступны модели всегда
+		if a.lazyTools {
+			params.Tools = a.mcp.CatalogTools() // только каталог серверов (ленивый режим)
+		} else {
+			params.Tools = a.mcp.Tools() // все тулы сразу (жадный режим, базовый день 20)
+		}
 	}
 
 	// Цикл tool-use: пока модель просит инструменты — выполняем их через MCP
@@ -152,6 +161,14 @@ func (a *Agent) ask(ctx context.Context, query string, p Policy, store bool) (Re
 				continue
 			}
 			tu := block.AsToolUse()
+			// Мета-тул ленивой загрузки: подмешиваем схемы тулов запрошенного сервера.
+			if a.lazyTools && tu.Name == LoadToolsName {
+				added, summary := a.mcp.LoadServer(tu.Input)
+				params.Tools = appendNewTools(params.Tools, added)
+				fmt.Printf("[lazy] load_tools %s → подмешано тулов: %d\n", oneLine(string(tu.Input), 60), len(added))
+				results = append(results, anthropic.NewToolResultBlock(tu.ID, summary, false))
+				continue
+			}
 			out, isErr := a.runTool(ctx, tu.Name, tu.Input)
 			results = append(results, anthropic.NewToolResultBlock(tu.ID, out, isErr))
 		}
