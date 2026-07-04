@@ -1,0 +1,2031 @@
+{
+  "model": "",
+  "dim": 0,
+  "strategy": "structural",
+  "chunks": [
+    {
+      "chunk_id": "agent.go#001-package-main",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "agent.go#002-import",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"encoding/json\"\n\t\"errors\"\n\t\"fmt\"\n\t\"strings\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n)",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "agent.go#003-type-reply",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "type Reply",
+      "text": "type Reply struct {\n\tText          string\n\tUsedLayers    []Layer\n\tProfileID     string\n\tInput, Output int64\n\tRefused       bool\n\tViolated      []string\n\tRefusedBy     string // \"код\" | \"LLM\"\n\tCheckVerdict  string // сырой ответ LLM-проверяющего (если включён -llm-check)\n\tStopReason    string // почему модель остановилась: end_turn | max_tokens | ...\n}",
+      "tokens": 44
+    },
+    {
+      "chunk_id": "agent.go#004-type-agent",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "type Agent",
+      "text": "// Agent — накопительный агент дня 12: память из дня 11 (3 слоя) + персонализация.\n// Активный профиль кладётся в ДОЛГОВРЕМЕННЫЙ слой памяти и подмешивается в System.\ntype Agent struct {\n\tclient    anthropic.Client\n\tmodel     anthropic.Model\n\tmaxTokens int64\n\tbase      string\n\tmem       *Memory\n\tprofileID string\n\tinv       *InvariantSet\n\tllmCheck  bool      // включает семантическую проверку (способ 2)\n\tmcp       *MCPTools // день 17: MCP-инструменты, доступны агенту всегда (если подключены)\n\tlazyTools bool      // день 20 (усиление): ленивая загрузка схем тулов по серверам\n}",
+      "tokens": 77
+    },
+    {
+      "chunk_id": "agent.go#005-const-maxtoolrounds",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "const maxToolRounds",
+      "text": "// maxToolRounds — потолок раундов tool-use на один Ask (защита от зацикливания,\n// в духе defaultReworkRounds из дня 15).\nconst maxToolRounds = 8",
+      "tokens": 23
+    },
+    {
+      "chunk_id": "agent.go#006-func-newagent",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func NewAgent",
+      "text": "func NewAgent(client anthropic.Client, model anthropic.Model, mem *Memory) *Agent {\n\treturn \u0026Agent{client: client, model: model, maxTokens: 1024, mem: mem,\n\t\tbase: \"Ты ассистент-помощник разработчика.\"}\n}",
+      "tokens": 23
+    },
+    {
+      "chunk_id": "agent.go#007-func-agent-memory",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.Memory",
+      "text": "func (a *Agent) Memory() *Memory { return a.mem }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "agent.go#008-func-agent-setinvariants",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.SetInvariants",
+      "text": "// SetInvariants подключает набор инвариантов (учитываются в каждом запросе).\nfunc (a *Agent) SetInvariants(inv *InvariantSet) { a.inv = inv }",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "agent.go#009-func-agent-invariants",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.Invariants",
+      "text": "func (a *Agent) Invariants() *InvariantSet       { return a.inv }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "agent.go#010-func-agent-setllmcheck",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.SetLLMCheck",
+      "text": "func (a *Agent) SetLLMCheck(on bool)             { a.llmCheck = on }",
+      "tokens": 10
+    },
+    {
+      "chunk_id": "agent.go#011-func-agent-setmcp",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.SetMCP",
+      "text": "// SetMCP подключает MCP-инструменты к агенту (день 17). Если задано — список\n// инструментов кладётся в каждый запрос, и модель может их вызывать (tool-use).\nfunc (a *Agent) SetMCP(m *MCPTools) { a.mcp = m }",
+      "tokens": 34
+    },
+    {
+      "chunk_id": "agent.go#012-func-agent-setlazytools",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.SetLazyTools",
+      "text": "// SetLazyTools включает ленивую загрузку схем (день 20, усиление): старт с каталога\n// серверов, схемы тулов сервера подмешиваются только после load_tools.\nfunc (a *Agent) SetLazyTools(on bool) { a.lazyTools = on }",
+      "tokens": 31
+    },
+    {
+      "chunk_id": "agent.go#013-func-agent-setmaxtokens",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.SetMaxTokens",
+      "text": "func (a *Agent) SetMaxTokens(n int64) {\n\tif n \u003e 0 {\n\t\ta.maxTokens = n\n\t}\n}",
+      "tokens": 16
+    },
+    {
+      "chunk_id": "agent.go#014-func-agent-setprofile",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.SetProfile",
+      "text": "// SetProfile делает профиль активным: его содержимое становится долговременным слоем.\nfunc (a *Agent) SetProfile(p Profile) {\n\ta.profileID = p.ID\n\ta.mem.SetLongDoc(p.Doc)\n}",
+      "tokens": 21
+    },
+    {
+      "chunk_id": "agent.go#015-func-agent-profileid",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.ProfileID",
+      "text": "func (a *Agent) ProfileID() string { return a.profileID }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "agent.go#016-func-agent-ask",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.Ask",
+      "text": "// Ask: собирает запрос из выбранных слоёв памяти (включая профиль как long-term),\n// диалог пишет в short-term.\nfunc (a *Agent) Ask(ctx context.Context, query string, p Policy) (Reply, error) {\n\treturn a.ask(ctx, query, p, true)\n}",
+      "tokens": 35
+    },
+    {
+      "chunk_id": "agent.go#017-func-agent-askonce",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.AskOnce",
+      "text": "// AskOnce: разовый запрос без записи диалога (для сравнения профилей).\nfunc (a *Agent) AskOnce(ctx context.Context, query string, p Policy) (Reply, error) {\n\treturn a.ask(ctx, query, p, false)\n}",
+      "tokens": 28
+    },
+    {
+      "chunk_id": "agent.go#018-func-agent-ask",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.ask",
+      "text": "func (a *Agent) ask(ctx context.Context, query string, p Policy, store bool) (Reply, error) {\n\t// enforcement инвариантов ДО основного запроса\n\tvar llmVerdict string\n\tif a.inv != nil {\n\t\tif v := EnforceCode(a.inv, query); !v.Allowed {\n\t\t\tr := a.refuse(v)\n\t\t\tr.RefusedBy = \"код\"\n\t\t\treturn r, nil\n\t\t}\n\t\tif a.llmCheck {\n\t\t\tv, err := EnforceLLM(ctx, a.client, a.model, a.inv, query)\n\t\t\tif err == nil {\n\t\t\t\tllmVerdict = v.Raw\n\t\t\t\tif !v.Allowed {\n\t\t\t\t\tr := a.refuse(v)\n\t\t\t\t\tr.RefusedBy = \"LLM\"\n\t\t\t\t\tr.CheckVerdict = v.Raw\n\t\t\t\t\treturn r, nil\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\tsystem, msgs, used := a.mem.Build(query, p)\n\tsystem = append([]anthropic.TextBlockParam{{Text: a.base}}, system...)\n\tif a.inv != nil {\n\t\tif block := a.inv.Render(); block != \"\" {\n\t\t\tsystem = append(system, anthropic.TextBlockParam{Text: \"[ИНВАРИАНТЫ]\\n\" + block})\n\t\t}\n\t}\n\n\tparams := anthropic.MessageNewParams{\n\t\tModel: a.model, MaxTokens: a.maxTokens, System: system, Messages: msgs,\n\t}\n\tif a.mcp != nil {\n\t\tif a.lazyTools {\n\t\t\tparams.Tools = a.mcp.CatalogTools() // только каталог серверов (ленивый режим)\n\t\t} else {\n\t\t\tparams.Tools = a.mcp.Tools() // все тулы сразу (жадный режим, базовый день 20)\n\t\t}\n\t}\n\n\t// Цикл tool-use: пока модель просит инструменты — выполняем их через MCP\n\t// (с проверкой инвариантов на КАЖДЫЙ вызов) и возвращаем результаты.\n\tvar inTok, outTok int64\n\tfor round := 0; round \u003c maxToolRounds; round++ {\n\t\tmsg, err := a.client.Messages.New(ctx, params)\n\t\tif err != nil {\n\t\t\treturn Reply{}, fmt.Errorf(\"agent: request failed: %w\", err)\n\t\t}\n\t\tinTok += msg.Usage.InputTokens\n\t\toutTok += msg.Usage.OutputTokens\n\n\t\t// Нет инструментов или модель не просит их — это финальный ответ.\n\t\tif a.mcp == nil || string(msg.StopReason) != string(anthropic.StopReasonToolUse) {\n\t\t\ttext := collectText(msg)\n\t\t\tif text == \"\" {\n\t\t\t\treturn Reply{}, errors.New(\"agent: empty response\")\n\t\t\t}\n\t\t\tif store {\n\t\t\t\ta.mem.Dialog(roleUser, query)\n\t\t\t\ta.mem.Dialog(roleAssistant, text)\n\t\t\t}\n\t\t\treturn Reply{\n\t\t\t\tText: text, UsedLayers: used, ProfileID: a.profileID,\n\t\t\t\tInput: inTok, Output: outTok,\n\t\t\t\tCheckVerdict: llmVerdict, StopReason: string(msg.StopReason),\n\t\t\t}, nil\n\t\t}\n\n\t\t// Раунд tool-use: добавляем ход ассистента (с tool_use) и выполняем вызовы.\n\t\tparams.Messages = append(params.Messages, msg.ToParam())\n\t\tvar results []anthropic.ContentBlockParamUnion\n\t\tfor _, block := range msg.Content {\n\t\t\tif block.Type != \"tool_use\" {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\ttu := block.AsToolUse()\n\t\t\t// Мета-тул ленивой загрузки: подмешиваем схемы тулов запрошенного сервера.\n\t\t\tif a.lazyTools \u0026\u0026 tu.Name == LoadToolsName {\n\t\t\t\tadded, summary := a.mcp.LoadServer(tu.Input)\n\t\t\t\tparams.Tools = appendNewTools(params.Tools, added)\n\t\t\t\tfmt.Printf(\"[lazy] load_tools %s → подмешано тулов: %d\\n\", oneLine(string(tu.Input), 60), len(added))\n\t\t\t\tresults = append(results, anthropic.NewToolResultBlock(tu.ID, summary, false))\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tout, isErr := a.runTool(ctx, tu.Name, tu.Input)\n\t\t\tresults = append(results, anthropic.NewToolResultBlock(tu.ID, out, isErr))\n\t\t}\n\t\tparams.Messages = append(params.Messages, anthropic.NewUserMessage(results...))\n\t}\n\treturn Reply{}, errors.New(\"agent: превышен лимит раундов tool-use\")\n}",
+      "tokens": 386
+    },
+    {
+      "chunk_id": "agent.go#019-func-agent-runtool",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.runTool",
+      "text": "// runTool применяет инварианты к НАМЕРЕНИЮ вызвать инструмент и, если разрешено,\n// выполняет его через MCP. Отказ возвращается модели как tool_result с is_error,\n// чтобы агент не мог обойти инвариант через инструмент и видел причину отказа.\nfunc (a *Agent) runTool(ctx context.Context, name string, input json.RawMessage) (string, bool) {\n\tintent := name + \" \" + string(input)\n\tif a.inv != nil {\n\t\tif v := EnforceCode(a.inv, intent); !v.Allowed {\n\t\t\tfmt.Printf(\"[инвариант/код] вызов %s отклонён: %s\\n\", name, v.Reason)\n\t\t\treturn \"ОТКАЗ (инвариант, проверка кодом): \" + v.Reason, true\n\t\t}\n\t\tif a.llmCheck {\n\t\t\tif v, err := EnforceLLM(ctx, a.client, a.model, a.inv, intent); err == nil \u0026\u0026 !v.Allowed {\n\t\t\t\tfmt.Printf(\"[инвариант/LLM] вызов %s отклонён: %s\\n\", name, v.Reason)\n\t\t\t\treturn \"ОТКАЗ (инвариант, LLM): \" + v.Reason, true\n\t\t\t}\n\t\t}\n\t}\n\tfmt.Printf(\"[agent→mcp] %s %s\\n\", name, oneLine(string(input), 160))\n\tout, isErr := a.mcp.Call(ctx, name, input)\n\tfmt.Printf(\"[mcp→agent] %s\\n\", oneLine(out, 200))\n\treturn out, isErr\n}",
+      "tokens": 141
+    },
+    {
+      "chunk_id": "agent.go#020-func-agent-refuse",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func Agent.refuse",
+      "text": "// refuse формирует отказ агента с объяснением, какой инвариант нарушен.\nfunc (a *Agent) refuse(v Verdict) Reply {\n\tvia := \"LLM-проверка\"\n\tif v.ByCode {\n\t\tvia = \"проверка кодом\"\n\t}\n\ttext := \"Не могу выполнить: запрос нарушает инвариант. \" + v.Reason +\n\t\t\"\\n(\" + via + \"). Предложи вариант, не нарушающий инвариант, или сними ограничение явно.\"\n\treturn Reply{Text: text, ProfileID: a.profileID, Refused: true, Violated: v.Violated}\n}",
+      "tokens": 64
+    },
+    {
+      "chunk_id": "agent.go#021-func-collecttext",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func collectText",
+      "text": "func collectText(msg *anthropic.Message) string {\n\tvar b strings.Builder\n\tfor _, block := range msg.Content {\n\t\tif block.Type == \"text\" {\n\t\t\tb.WriteString(block.Text)\n\t\t}\n\t}\n\treturn b.String()\n}",
+      "tokens": 26
+    },
+    {
+      "chunk_id": "agent.go#022-func-layersstring",
+      "source": "agent.go",
+      "file": "agent.go",
+      "section": "func layersString",
+      "text": "func layersString(ls []Layer) string {\n\tif len(ls) == 0 {\n\t\treturn \"нет (stateless)\"\n\t}\n\tparts := make([]string, len(ls))\n\tfor i, l := range ls {\n\t\tparts[i] = l.String()\n\t}\n\treturn strings.Join(parts, \", \")\n}",
+      "tokens": 34
+    },
+    {
+      "chunk_id": "artifact.go#001-package-main",
+      "source": "artifact.go",
+      "file": "artifact.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "artifact.go#002-import",
+      "source": "artifact.go",
+      "file": "artifact.go",
+      "section": "import",
+      "text": "import \"strings\"",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "artifact.go#003-type-artifactcheck",
+      "source": "artifact.go",
+      "file": "artifact.go",
+      "section": "type ArtifactCheck",
+      "text": "// ArtifactCheck — результат лёгкой детерминированной проверки результата этапа.\n// НЕ компилирует код и НЕ требует наличия кода: ловит только объективные признаки\n// неполного/оборванного ответа. Содержательную проверку делает рой.\ntype ArtifactCheck struct {\n\tOK        bool   // результат пригоден для содержательной валидации (роя)\n\tTruncated bool   // ответ оборван (max_tokens или незакрытый блок кода)\n\tEmpty     bool   // результат пустой\n\tReason    string // причина при OK=false\n}",
+      "tokens": 64
+    },
+    {
+      "chunk_id": "artifact.go#004-func-checkresult",
+      "source": "artifact.go",
+      "file": "artifact.go",
+      "section": "func CheckResult",
+      "text": "// CheckResult — детерминированная проверка результата этапа.\n// stopReason — из API (end_turn | max_tokens | …). Костыля с `go build` нет.\nfunc CheckResult(text, stopReason string) ArtifactCheck {\n\ttrimmed := strings.TrimSpace(text)\n\tif trimmed == \"\" {\n\t\treturn ArtifactCheck{Empty: true, Reason: \"пустой результат этапа\"}\n\t}\n\t// 1) Штатный сигнал API: модель упёрлась в лимит токенов → ответ оборван.\n\tif stopReason == \"max_tokens\" {\n\t\treturn ArtifactCheck{Truncated: true,\n\t\t\tReason: \"ответ оборван по лимиту токенов (stop_reason=max_tokens)\"}\n\t}\n\t// 2) Незакрытый блок кода ```…``` — тоже признак обрыва (если оборвалось не по токенам).\n\tif strings.Count(text, \"```\")%2 != 0 {\n\t\treturn ArtifactCheck{Truncated: true,\n\t\t\tReason: \"незакрытый блок кода (```) — результат неполный\"}\n\t}\n\treturn ArtifactCheck{OK: true}\n}",
+      "tokens": 110
+    },
+    {
+      "chunk_id": "enforce.go#001-package-main",
+      "source": "enforce.go",
+      "file": "enforce.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "enforce.go#002-import",
+      "source": "enforce.go",
+      "file": "enforce.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"fmt\"\n\t\"strings\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n)",
+      "tokens": 7
+    },
+    {
+      "chunk_id": "enforce.go#003-type-verdict",
+      "source": "enforce.go",
+      "file": "enforce.go",
+      "section": "type Verdict",
+      "text": "// Verdict — результат проверки запроса на конфликт с инвариантами.\ntype Verdict struct {\n\tAllowed  bool\n\tViolated []string // id/описания нарушенных\n\tReason   string   // объяснение отказа\n\tByCode   bool     // сработала детерминированная проверка\n\tDecision string   // сырой DECISION от LLM-проверяющего (ALLOW/DENY)\n\tRaw      string   // сырой ответ LLM-проверяющего (для прозрачности)\n}",
+      "tokens": 49
+    },
+    {
+      "chunk_id": "enforce.go#004-func-enforcecode",
+      "source": "enforce.go",
+      "file": "enforce.go",
+      "section": "func EnforceCode",
+      "text": "// EnforceCode — способ 1: детерминированная проверка по стоп-словам (быстро, дёшево).\nfunc EnforceCode(set *InvariantSet, query string) Verdict {\n\thit := set.CheckCode(query)\n\tif len(hit) == 0 {\n\t\treturn Verdict{Allowed: true}\n\t}\n\tvar ids, reasons []string\n\tfor _, inv := range hit {\n\t\tids = append(ids, inv.ID)\n\t\treasons = append(reasons, inv.Text)\n\t}\n\treturn Verdict{\n\t\tAllowed:  false,\n\t\tViolated: ids,\n\t\tReason:   \"Запрос нарушает инвариант(ы): \" + strings.Join(reasons, \"; \"),\n\t\tByCode:   true,\n\t}\n}",
+      "tokens": 69
+    },
+    {
+      "chunk_id": "enforce.go#005-func-enforcellm",
+      "source": "enforce.go",
+      "file": "enforce.go",
+      "section": "func EnforceLLM",
+      "text": "// EnforceLLM — способ 2: семантическая проверка запроса моделью.\n// Возвращает вердикт ALLOW/DENY + объяснение. Эти способы не взаимоисключают друг друга.\nfunc EnforceLLM(ctx context.Context, client anthropic.Client, model anthropic.Model, set *InvariantSet, query string) (Verdict, error) {\n\trules := set.Render()\n\tsys := \"Ты — проверяющий. Тебе даны инварианты и запрос пользователя. \" +\n\t\t\"Реши, нарушает ли ВЫПОЛНЕНИЕ запроса хотя бы один инвариант. \" +\n\t\t\"Ответь строго в формате:\\nDECISION: ALLOW|DENY\\nREASON: \u003cодно предложение, какой инвариант и почему\u003e\"\n\tuser := \"[ИНВАРИАНТЫ]\\n\" + rules + \"\\n[ЗАПРОС]\\n\" + query\n\n\tmsg, err := client.Messages.New(ctx, anthropic.MessageNewParams{\n\t\tModel: model, MaxTokens: 200,\n\t\tSystem:   []anthropic.TextBlockParam{{Text: sys}},\n\t\tMessages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},\n\t})\n\tif err != nil {\n\t\treturn Verdict{}, fmt.Errorf(\"enforce(llm): %w\", err)\n\t}\n\tout := collectText(msg)\n\tdecision, reason := parseVerdict(out)\n\treturn Verdict{\n\t\tAllowed:  decision == \"ALLOW\",\n\t\tReason:   reason,\n\t\tDecision: decision,\n\t\tRaw:      strings.TrimSpace(out),\n\t}, nil\n}",
+      "tokens": 130
+    },
+    {
+      "chunk_id": "enforce.go#006-func-parseverdict",
+      "source": "enforce.go",
+      "file": "enforce.go",
+      "section": "func parseVerdict",
+      "text": "func parseVerdict(s string) (decision, reason string) {\n\tdecision = \"ALLOW\"\n\tfor _, line := range strings.Split(s, \"\\n\") {\n\t\tl := strings.TrimSpace(line)\n\t\tup := strings.ToUpper(l)\n\t\tif strings.HasPrefix(up, \"DECISION:\") {\n\t\t\tif strings.Contains(up, \"DENY\") {\n\t\t\t\tdecision = \"DENY\"\n\t\t\t} else {\n\t\t\t\tdecision = \"ALLOW\"\n\t\t\t}\n\t\t}\n\t\tif strings.HasPrefix(up, \"REASON:\") {\n\t\t\treason = strings.TrimSpace(l[len(\"REASON:\"):])\n\t\t}\n\t}\n\treturn decision, reason\n}",
+      "tokens": 56
+    },
+    {
+      "chunk_id": "invariants.go#001-package-main",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "invariants.go#002-import",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "import",
+      "text": "import (\n\t\"fmt\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"strings\"\n)",
+      "tokens": 7
+    },
+    {
+      "chunk_id": "invariants.go#003-type-invariant",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "type Invariant",
+      "text": "// Invariant — ограничение, которое агент не имеет права нарушать.\n// Kind: \"system\" (подкапотное) или \"user\" (заданное пользователем).\ntype Invariant struct {\n\tID   string   `json:\"id\"`\n\tText string   `json:\"text\"` // человекочитаемое правило\n\tKind string   `json:\"kind\"` // system | user\n\tDeny []string `json:\"deny\"` // стоп-слова для детерминированной проверки (lower-case)\n}",
+      "tokens": 48
+    },
+    {
+      "chunk_id": "invariants.go#004-type-invariantset",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "type InvariantSet",
+      "text": "// InvariantSet хранит инварианты ОТДЕЛЬНО от диалога (свой файл invariants.json).\ntype InvariantSet struct {\n\tdir  string\n\tlist []Invariant\n}",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "invariants.go#005-func-newinvariantset",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func NewInvariantSet",
+      "text": "func NewInvariantSet(dir string) *InvariantSet {\n\ts := \u0026InvariantSet{dir: dir}\n\ts.list = append(s.list, systemInvariants()...)\n\ts.load() // пользовательские поверх системных\n\treturn s\n}",
+      "tokens": 21
+    },
+    {
+      "chunk_id": "invariants.go#006-func-systeminvariants",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func systemInvariants",
+      "text": "// systemInvariants — подкапотные ограничения (юзер может о них не знать).\nfunc systemInvariants() []Invariant {\n\treturn []Invariant{\n\t\t{ID: \"stack-go\", Kind: \"system\",\n\t\t\tText: \"Стек только Go. Не предлагать другие языки (Java, Python, Rust…) без явного снятия инварианта.\",\n\t\t\tDeny: []string{\"на java\", \"на python\", \"на rust\", \"напиши на c#\", \"перепиши на java\"}},\n\t\t{ID: \"no-secrets\", Kind: \"system\",\n\t\t\tText: \"Не хардкодить секреты/ключи в коде; только через переменные окружения.\",\n\t\t\tDeny: []string{\"захардкоди ключ\", \"впиши пароль в код\", \"secret в коде\"}},\n\t}\n}",
+      "tokens": 75
+    },
+    {
+      "chunk_id": "invariants.go#007-func-invariantset-all",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func InvariantSet.All",
+      "text": "func (s *InvariantSet) All() []Invariant { return s.list }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "invariants.go#008-func-invariantset-add",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func InvariantSet.Add",
+      "text": "func (s *InvariantSet) Add(text string, deny []string) Invariant {\n\tinv := Invariant{\n\t\tID:   fmt.Sprintf(\"user-%d\", len(s.list)+1),\n\t\tText: text, Kind: \"user\", Deny: lowerAll(deny),\n\t}\n\ts.list = append(s.list, inv)\n\t_ = s.save()\n\treturn inv\n}",
+      "tokens": 32
+    },
+    {
+      "chunk_id": "invariants.go#009-func-invariantset-render",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func InvariantSet.Render",
+      "text": "// Render — блок для System prompt: агент обязан учитывать эти правила.\nfunc (s *InvariantSet) Render() string {\n\tif len(s.list) == 0 {\n\t\treturn \"\"\n\t}\n\tvar b strings.Builder\n\tb.WriteString(\"Ты ОБЯЗАН соблюдать инварианты ниже. Если запрос им противоречит — \")\n\tb.WriteString(\"откажись и объясни, какой инвариант нарушается; предложи допустимую альтернативу.\\n\")\n\tfor _, inv := range s.list {\n\t\tfmt.Fprintf(\u0026b, \"- [%s] %s\\n\", inv.ID, inv.Text)\n\t}\n\treturn b.String()\n}",
+      "tokens": 66
+    },
+    {
+      "chunk_id": "invariants.go#010-func-invariantset-checkcode",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func InvariantSet.CheckCode",
+      "text": "// CheckCode — детерминированная проверка (способ 1): ищет стоп-слова в тексте.\n// Возвращает нарушенные инварианты.\nfunc (s *InvariantSet) CheckCode(text string) []Invariant {\n\tlow := strings.ToLower(text)\n\tvar hit []Invariant\n\tfor _, inv := range s.list {\n\t\tfor _, d := range inv.Deny {\n\t\t\tif d != \"\" \u0026\u0026 strings.Contains(low, d) {\n\t\t\t\thit = append(hit, inv)\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t}\n\treturn hit\n}",
+      "tokens": 61
+    },
+    {
+      "chunk_id": "invariants.go#011-func-invariantset-load",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func InvariantSet.load",
+      "text": "func (s *InvariantSet) load() {\n\tif s.dir == \"\" {\n\t\treturn\n\t}\n\tvar user []Invariant\n\tif err := readJSON(filepath.Join(s.dir, \"invariants.json\"), \u0026user); err == nil {\n\t\ts.list = append(s.list, user...)\n\t}\n}",
+      "tokens": 31
+    },
+    {
+      "chunk_id": "invariants.go#012-func-invariantset-save",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func InvariantSet.save",
+      "text": "func (s *InvariantSet) save() error {\n\tif s.dir == \"\" {\n\t\treturn nil\n\t}\n\tvar user []Invariant\n\tfor _, inv := range s.list {\n\t\tif inv.Kind == \"user\" {\n\t\t\tuser = append(user, inv)\n\t\t}\n\t}\n\tif err := os.MkdirAll(s.dir, 0o755); err != nil {\n\t\treturn err\n\t}\n\treturn writeJSON(filepath.Join(s.dir, \"invariants.json\"), user)\n}",
+      "tokens": 52
+    },
+    {
+      "chunk_id": "invariants.go#013-func-lowerall",
+      "source": "invariants.go",
+      "file": "invariants.go",
+      "section": "func lowerAll",
+      "text": "func lowerAll(ss []string) []string {\n\tout := make([]string, 0, len(ss))\n\tfor _, s := range ss {\n\t\tout = append(out, strings.ToLower(strings.TrimSpace(s)))\n\t}\n\treturn out\n}",
+      "tokens": 25
+    },
+    {
+      "chunk_id": "main.go#001-package-main",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "main.go#002-import",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "import",
+      "text": "import (\n\t\"bufio\"\n\t\"context\"\n\t\"encoding/json\"\n\t\"flag\"\n\t\"fmt\"\n\t\"log\"\n\t\"os\"\n\t\"os/signal\"\n\t\"path/filepath\"\n\t\"runtime\"\n\t\"strconv\"\n\t\"strings\"\n\t\"syscall\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n\t\"github.com/joho/godotenv\"\n)",
+      "tokens": 18
+    },
+    {
+      "chunk_id": "main.go#003-func-swarmstageof",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "func swarmStageOf",
+      "text": "// swarmStageOf парсит значение флага -swarm-stage в TaskState.\nfunc swarmStageOf(v string) TaskState {\n\tif v == \"planning\" {\n\t\treturn StatePlanning\n\t}\n\treturn StateValidation\n}",
+      "tokens": 24
+    },
+    {
+      "chunk_id": "main.go#004-func-sourcedir",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "func sourceDir",
+      "text": "func sourceDir() string {\n\tif _, file, _, ok := runtime.Caller(0); ok {\n\t\treturn filepath.Dir(file)\n\t}\n\treturn \".\"\n}",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "main.go#005-func-main",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "func main",
+      "text": "func main() {\n\treportMode := flag.Bool(\"report\", false, \"демонстрация (память + профили) и выход\")\n\tmemDir := flag.String(\"mem\", filepath.Join(sourceDir(), \"memory\"), \"каталог памяти (short-term/working)\")\n\tprofilesDir := flag.String(\"profiles\", filepath.Join(sourceDir(), \"profiles\"), \"каталог профилей (\u003cid\u003e.md)\")\n\tactive := flag.String(\"profile\", \"senior-go\", \"активный профиль\")\n\tconfirm := flag.Bool(\"confirm\", false, \"спрашивать подтверждение перед переходом этапа (пауза)\")\n\tllmCheck := flag.Bool(\"llm-check\", false, \"включить семантическую проверку инвариантов через LLM\")\n\tswarmOn := flag.Bool(\"swarm\", false, \"включить рой ревьюеров\")\n\tswarmStage := flag.String(\"swarm-stage\", \"validation\", \"этап роя: planning | validation\")\n\tmaxTokens := flag.Int64(\"max-tokens\", 4096, \"лимит токенов ответа модели\")\n\twatchSec := flag.Int(\"watch\", 0, \"день 18: режим 24/7 — печатать сводку каждые N сек (0 = обычный REPL)\")\n\ttrack := flag.String(\"track\", \"Berlin,Sofia\", \"watch: города через запятую для фонового сбора\")\n\tinterval := flag.Int(\"interval\", 30, \"watch: период фонового сбора на сервере, сек\")\n\tlazy := flag.Bool(\"lazy\", true, \"день 20: ленивая загрузка схем тулов (каталог серверов → load_tools). false = слать все схемы сразу\")\n\tflag.Parse()\n\n\tif err := godotenv.Load(); err != nil {\n\t\tlog.Fatalf(\"failed to load .env: %s\", err.Error())\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\n\tclient := anthropic.NewClient()\n\tmodel := anthropic.ModelClaudeOpus4_8\n\n\tif *reportMode {\n\t\tif err := runReport(ctx, client, *profilesDir, *memDir, *swarmOn, *swarmStage, *maxTokens); err != nil {\n\t\t\tlog.Fatalf(\"report failed: %s\", err.Error())\n\t\t}\n\t\treturn\n\t}\n\n\tmem, _ := LoadMemory(*memDir)\n\tstore := NewProfileStore(*profilesDir)\n\tagent := NewAgent(client, model, mem)\n\tif p, err := store.Load(*active); err == nil {\n\t\tagent.SetProfile(p)\n\t} else {\n\t\tlog.Printf(\"профиль %q не найден, работаю без профиля\", *active)\n\t}\n\tinv := NewInvariantSet(*memDir)\n\tagent.SetInvariants(inv)\n\tagent.SetLLMCheck(*llmCheck)\n\tagent.SetMaxTokens(*maxTokens)\n\n\t// День 17: инструменты доступны агенту всегда, вызовы проходят через инварианты.\n\t// День 20: оркестрация НЕСКОЛЬКИХ MCP-серверов разной природы.\n\tservers := []ServerSpec{\n\t\t{Name: \"weather\", Purpose: \"погода, геокодинг, фоновое слежение за городами\",\n\t\t\tCmd: []string{\"go\", \"run\", filepath.Join(sourceDir(), \"weatherserver\")}},\n\t\t{Name: \"notes\", Purpose: \"файловое хранилище: сохранить/прочитать/список/удалить\",\n\t\t\tCmd: []string{\"go\", \"run\", filepath.Join(sourceDir(), \"notesserver\")}},\n\t}\n\tmcptools, mcpStop, err := ConnectMCP(ctx, servers)\n\tif err != nil {\n\t\tlog.Printf(\"MCP недоступен (%v) — работаю без инструментов\", err)\n\t} else {\n\t\tdefer mcpStop()\n\t\tagent.SetMCP(mcptools)\n\t\tagent.SetLazyTools(*lazy)\n\t\tmode := \"жадный (все схемы сразу)\"\n\t\tif *lazy {\n\t\t\tmode = \"ленивый (каталог серверов → load_tools)\"\n\t\t}\n\t\tfmt.Printf(\"MCP: %d тул(ов) с %d серверов · режим схем: %s\\n  %s\\n\",\n\t\t\tmcptools.Len(), 2, mode, mcptools.Breakdown())\n\t}\n\n\t// День 18: режим 24/7. Агент ставит города на фоновый сбор и периодически\n\t// печатает агрегированную сводку. Токены не тратятся (прямые вызовы тулов).\n\tif *watchSec \u003e 0 {\n\t\tif mcptools == nil {\n\t\t\tlog.Fatal(\"режим -watch требует доступного MCP-сервера\")\n\t\t}\n\t\trunWatch(ctx, mcptools, *watchSec, strings.Split(*track, \",\"), *interval)\n\t\t_ = mem.Save()\n\t\treturn\n\t}\n\n\tfmt.Println(\"Накопительный агент: память (3 слоя) + персонализация.\")\n\tfmt.Printf(\"Активный профиль: %q · профили: %v\\n\", agent.ProfileID(), store.List())\n\tfmt.Printf(\"Память: %s\\n\", *memDir)\n\tfmt.Println(\"Команды:\")\n\tfmt.Println(\"  профиль (long-term): /profile \u003cid\u003e · /profiles · /whoami\")\n\tfmt.Println(\"  working:  /task \u003cимя\u003e · /goal \u003c..\u003e · /plan a; b · /current \u003cшаг\u003e · /done \u003cшаг\u003e · /decide k=v\")\n\tfmt.Println(\"  состояние:/state · /run (прогнать этапы) · /advance (шаг вперёд) · pause\")\n\tfmt.Println(\"  инварианты:/invariants · /forbid \u003cстоп-слово\u003e · /invariant \u003cправило\u003e\")\n\tfmt.Println(\"  переходы: /approve-plan · /validate-ok · /goto \u003cstate\u003e (контроль gate)\")\n\tfmt.Println(\"  прочее:   /mem · /reset-task · exit\")\n\tif *confirm {\n\t\tfmt.Println(\"  режим -confirm: перед каждым переходом спрошу y/n/pause\")\n\t}\n\tif mem.State().valid() \u0026\u0026 mem.TaskName() != \"\" {\n\t\tfmt.Printf(\"Возобновление: задача %q на этапе %s.\\n\", mem.TaskName(), mem.State())\n\t}\n\n\treader := bufio.NewReader(os.Stdin)\n\tpipe := NewPipeline(agent, *confirm, reader)\n\tif *swarmOn {\n\t\tpipe.EnableSwarm(NewSwarm(client, model, swarmStageOf(*swarmStage)))\n\t}\n\tfor {\n\t\tfmt.Print(\"\u003e \")\n\t\tline, err := reader.ReadString('\\n')\n\t\tif err != nil {\n\t\t\tfmt.Println()\n\t\t\tbreak\n\t\t}\n\t\tline = strings.TrimSpace(line)\n\t\tswitch {\n\t\tcase line == \"\":\n\t\t\tcontinue\n\t\tcase line == \"exit\":\n\t\t\t_ = mem.Save()\n\t\t\tfmt.Println(\"Сохранил память. Exiting\")\n\t\t\treturn\n\t\tcase line == \"/mem\":\n\t\t\tfmt.Print(mem.Inspect())\n\t\t\tcontinue\n\t\tcase line == \"/reset-task\":\n\t\t\tmem.ResetTask()\n\t\t\tfmt.Println(\"рабочая память очищена\")\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/track \"):\n\t\t\tif mcptools == nil {\n\t\t\t\tfmt.Println(\"MCP недоступен\")\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tparts := strings.Fields(strings.TrimPrefix(line, \"/track \"))\n\t\t\tif len(parts) == 0 {\n\t\t\t\tfmt.Println(\"использование: /track \u003cгород\u003e [интервал_сек]\")\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tiv := 30\n\t\t\tif n, err := strconv.Atoi(parts[len(parts)-1]); err == nil \u0026\u0026 len(parts) \u003e 1 {\n\t\t\t\tiv = n\n\t\t\t\tparts = parts[:len(parts)-1]\n\t\t\t}\n\t\t\tout, _ := mcptools.Call(ctx, \"track_location\", jsonArgs(map[string]any{\n\t\t\t\t\"location\": strings.Join(parts, \" \"), \"interval_sec\": iv,\n\t\t\t}))\n\t\t\tfmt.Println(out)\n\t\t\tcontinue\n\t\tcase line == \"/summary\" || strings.HasPrefix(line, \"/summary \"):\n\t\t\tif mcptools == nil {\n\t\t\t\tfmt.Println(\"MCP недоступен\")\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tloc := strings.TrimSpace(strings.TrimPrefix(line, \"/summary\"))\n\t\t\tout, _ := mcptools.Call(ctx, \"weather_summary\", jsonArgs(map[string]any{\"location\": loc}))\n\t\t\tfmt.Println(out)\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/untrack \"):\n\t\t\tif mcptools == nil {\n\t\t\t\tfmt.Println(\"MCP недоступен\")\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tcity := strings.TrimSpace(strings.TrimPrefix(line, \"/untrack \"))\n\t\t\tout, _ := mcptools.Call(ctx, \"untrack_location\", jsonArgs(map[string]any{\"location\": city}))\n\t\t\tfmt.Println(out)\n\t\t\tcontinue\n\t\tcase line == \"/untrack-all\":\n\t\t\tif mcptools == nil {\n\t\t\t\tfmt.Println(\"MCP недоступен\")\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tlisted, _ := mcptools.Call(ctx, \"list_tracked\", json.RawMessage(`{}`))\n\t\t\tfor _, row := range strings.Split(listed, \"\\n\") {\n\t\t\t\tname := strings.TrimSpace(strings.SplitN(row, \",\", 2)[0])\n\t\t\t\tif name == \"\" || name == \"ничего не отслеживается\" {\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tmcptools.Call(ctx, \"untrack_location\", jsonArgs(map[string]any{\"location\": name}))\n\t\t\t}\n\t\t\tfmt.Println(\"всё снято с отслеживания\")\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/watch \"):\n\t\t\tif mcptools == nil {\n\t\t\t\tfmt.Println(\"MCP недоступен\")\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tn, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, \"/watch \")))\n\t\t\tif err != nil || n \u003c= 0 {\n\t\t\t\tfmt.Println(\"использование: /watch \u003cсек\u003e (Ctrl-C для выхода из режима)\")\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\trunWatch(ctx, mcptools, n, nil, 30)\n\t\t\tcontinue\n\t\tcase line == \"/profiles\":\n\t\t\tfmt.Printf(\"доступно: %v\\n\", store.List())\n\t\t\tcontinue\n\t\tcase line == \"/whoami\":\n\t\t\tfmt.Printf(\"активный профиль: %q\\n%s\\n\", agent.ProfileID(), mem.LongDoc())\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/profile \"):\n\t\t\tid := strings.TrimSpace(strings.TrimPrefix(line, \"/profile \"))\n\t\t\tp, err := store.Load(id)\n\t\t\tif err != nil {\n\t\t\t\tfmt.Printf(\"профиль %q не найден; доступно: %v\\n\", id, store.List())\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tagent.SetProfile(p)\n\t\t\tfmt.Printf(\"профиль переключён на %q\\n\", id)\n\t\t\tcontinue\n\t\tcase line == \"/invariants\":\n\t\t\tfor _, iv := range inv.All() {\n\t\t\t\tfmt.Printf(\"  [%s/%s] %s\\n\", iv.Kind, iv.ID, iv.Text)\n\t\t\t}\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/forbid \"):\n\t\t\tword := strings.TrimSpace(strings.TrimPrefix(line, \"/forbid \"))\n\t\t\tiv := inv.Add(\"Запрещено пользователем: \"+word, []string{word})\n\t\t\tfmt.Printf(\"добавлен инвариант [%s]: запрет %q\\n\", iv.ID, word)\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/invariant \"):\n\t\t\trule := strings.TrimSpace(strings.TrimPrefix(line, \"/invariant \"))\n\t\t\tiv := inv.Add(rule, nil)\n\t\t\tfmt.Printf(\"добавлен инвариант [%s] (семантический, проверяется LLM): %s\\n\", iv.ID, rule)\n\t\t\tcontinue\n\t\tcase line == \"/state\":\n\t\t\tfmt.Printf(\"state=%s — %s | план утверждён=%v, валидация=%v\\n\",\n\t\t\t\tmem.State(), expectedAction[mem.State()], mem.PlanApproved(), mem.Validated())\n\t\t\tcontinue\n\t\tcase line == \"/approve-plan\":\n\t\t\tmem.ApprovePlan()\n\t\t\t_ = mem.Save()\n\t\t\tfmt.Println(\"план утверждён — теперь разрешён переход planning → execution\")\n\t\t\tcontinue\n\t\tcase line == \"/validate-ok\":\n\t\t\tmem.MarkValidated()\n\t\t\t_ = mem.Save()\n\t\t\tfmt.Println(\"валидация отмечена пройденной — разрешён переход validation → done\")\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/goto \"):\n\t\t\ttarget := TaskState(strings.TrimSpace(strings.TrimPrefix(line, \"/goto \")))\n\t\t\tfrom := mem.State()\n\t\t\tif err := mem.Goto(target); err != nil {\n\t\t\t\tfmt.Printf(\"ПЕРЕХОД ЗАПРЕЩЁН: %s. Остаюсь на %s.\\n\", err.Error(), from)\n\t\t\t} else {\n\t\t\t\tfmt.Printf(\"переход %s → %s выполнен\\n\", from, target)\n\t\t\t\t_ = mem.Save()\n\t\t\t}\n\t\t\tcontinue\n\t\tcase line == \"/advance\":\n\t\t\tfrom := mem.State()\n\t\t\tto, err := mem.Advance()\n\t\t\tif err != nil {\n\t\t\t\tfmt.Println(\"переход невозможен:\", err.Error())\n\t\t\t} else {\n\t\t\t\tfmt.Printf(\"переход %s → %s\\n\", from, to)\n\t\t\t\t_ = mem.Save()\n\t\t\t}\n\t\t\tcontinue\n\t\tcase line == \"/run\":\n\t\t\tdone, err := pipe.Run(ctx)\n\t\t\tif err != nil {\n\t\t\t\tlog.Printf(\"pipeline: %s\", err.Error())\n\t\t\t} else if done {\n\t\t\t\tfmt.Println(\"[pipeline] задача доведена до done.\")\n\t\t\t}\n\t\t\tcontinue\n\t\tcase strings.HasPrefix(line, \"/\"):\n\t\t\thandleWorkingCmd(mem, line)\n\t\t\tcontinue\n\t\t}\n\n\t\treply, err := agent.Ask(ctx, line, FullPolicy())\n\t\tif err != nil {\n\t\t\tif ctx.Err() != nil {\n\t\t\t\treturn\n\t\t\t}\n\t\t\tlog.Printf(\"error: %s\", err.Error())\n\t\t\tcontinue\n\t\t}\n\t\tfmt.Println(reply.Text)\n\t\tfmt.Printf(\"[профиль %q · слои: %s]\\n\", reply.ProfileID, layersString(reply.UsedLayers))\n\t\t_ = mem.Save()\n\t}\n}",
+      "tokens": 1110
+    },
+    {
+      "chunk_id": "main.go#006-func-handleworkingcmd",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "func handleWorkingCmd",
+      "text": "func handleWorkingCmd(mem *Memory, line string) {\n\tcmd, arg := splitCmd(line)\n\tswitch cmd {\n\tcase \"/task\":\n\t\tmem.SetTask(arg, mem.taskGoal())\n\t\tfmt.Println(\"задача задана (working)\")\n\tcase \"/goal\":\n\t\tmem.SetTask(mem.taskName(), arg)\n\t\tfmt.Println(\"цель задана (working)\")\n\tcase \"/plan\":\n\t\tsteps := splitSemicolons(arg)\n\t\tmem.SetPlan(steps...)\n\t\tfmt.Printf(\"план: %v\\n\", steps)\n\tcase \"/current\":\n\t\tmem.SetCurrent(arg)\n\t\tfmt.Println(\"текущий шаг задан (working)\")\n\tcase \"/done\":\n\t\tmem.MarkDone(arg)\n\t\tfmt.Println(\"шаг выполнен (working)\")\n\tcase \"/decide\":\n\t\tk, v := splitKV(arg)\n\t\tmem.Decide(k, v)\n\t\tfmt.Println(\"решение сохранено (working)\")\n\tdefault:\n\t\tfmt.Println(\"неизвестная команда\")\n\t}\n}",
+      "tokens": 65
+    },
+    {
+      "chunk_id": "main.go#007-func-splitcmd",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "func splitCmd",
+      "text": "func splitCmd(line string) (string, string) {\n\tf := strings.SplitN(line, \" \", 2)\n\tif len(f) == 1 {\n\t\treturn f[0], \"\"\n\t}\n\treturn f[0], strings.TrimSpace(f[1])\n}",
+      "tokens": 25
+    },
+    {
+      "chunk_id": "main.go#008-func-splitkv",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "func splitKV",
+      "text": "func splitKV(s string) (string, string) {\n\ti := strings.IndexByte(s, '=')\n\tif i \u003c 0 {\n\t\treturn s, \"\"\n\t}\n\treturn strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:])\n}",
+      "tokens": 23
+    },
+    {
+      "chunk_id": "main.go#009-func-splitsemicolons",
+      "source": "main.go",
+      "file": "main.go",
+      "section": "func splitSemicolons",
+      "text": "func splitSemicolons(s string) []string {\n\tvar out []string\n\tfor _, p := range strings.Split(s, \";\") {\n\t\tif t := strings.TrimSpace(p); t != \"\" {\n\t\t\tout = append(out, t)\n\t\t}\n\t}\n\treturn out\n}",
+      "tokens": 33
+    },
+    {
+      "chunk_id": "mcptools.go#001-package-main",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "mcptools.go#002-import",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n\t\"os/exec\"\n\t\"path/filepath\"\n\t\"sort\"\n\t\"strings\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n\t\"github.com/modelcontextprotocol/go-sdk/mcp\"\n)",
+      "tokens": 13
+    },
+    {
+      "chunk_id": "mcptools.go#003-type-serverspec",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "type ServerSpec",
+      "text": "// ServerSpec — один MCP-сервер: логическое имя + назначение + команда запуска.\ntype ServerSpec struct {\n\tName    string\n\tPurpose string // короткое назначение для каталога (ленивый режим)\n\tCmd     []string\n}",
+      "tokens": 30
+    },
+    {
+      "chunk_id": "mcptools.go#004-const-loadtoolsname",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "const LoadToolsName",
+      "text": "// LoadToolsName — имя мета-тула ленивой загрузки схем (обрабатывается агентом, не сервером).\nconst LoadToolsName = \"load_tools\"",
+      "tokens": 16
+    },
+    {
+      "chunk_id": "mcptools.go#005-type-mcptools",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "type MCPTools",
+      "text": "// MCPTools — день 20: подключение к НЕСКОЛЬКИМ MCP-серверам, агрегация их тулов\n// и МАРШРУТИЗАЦИЯ вызова по имени тула к серверу-владельцу.\ntype MCPTools struct {\n\ttools    []anthropic.ToolUnionParam    // объединённый список для модели (жадный режим)\n\troute    map[string]*mcp.ClientSession // имя тула -\u003e сессия владельца\n\torigin   map[string]string             // имя тула -\u003e имя сервера (для вывода)\n\tbyServer map[string][]string           // сервер -\u003e его тулы (имена)\n\n\t// для ленивого режима (день 20, усиление):\n\ttoolsByServer map[string][]anthropic.ToolUnionParam // сервер -\u003e его тулы (схемы)\n\tpurpose       map[string]string                     // сервер -\u003e назначение (для каталога)\n\tserverOrder   []string                              // порядок серверов (детерминированный)\n}",
+      "tokens": 90
+    },
+    {
+      "chunk_id": "mcptools.go#006-func-connectmcp",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func ConnectMCP",
+      "text": "// ConnectMCP поднимает все указанные серверы (stdio-сабпроцессы), собирает их тулы\n// в общий список и строит таблицу маршрутизации. Возвращает реестр и stop-функцию.\nfunc ConnectMCP(ctx context.Context, servers []ServerSpec) (*MCPTools, func(), error) {\n\tm := \u0026MCPTools{\n\t\troute:         map[string]*mcp.ClientSession{},\n\t\torigin:        map[string]string{},\n\t\tbyServer:      map[string][]string{},\n\t\ttoolsByServer: map[string][]anthropic.ToolUnionParam{},\n\t\tpurpose:       map[string]string{},\n\t}\n\tvar stops []func()\n\tstopAll := func() {\n\t\tfor _, s := range stops {\n\t\t\ts()\n\t\t}\n\t}\n\n\tfor _, spec := range servers {\n\t\tm.serverOrder = append(m.serverOrder, spec.Name)\n\t\tm.purpose[spec.Name] = spec.Purpose\n\t\tclient := mcp.NewClient(\u0026mcp.Implementation{Name: \"day20-agent\", Version: \"0.1.0\"}, nil)\n\t\tcmd := exec.CommandContext(ctx, spec.Cmd[0], spec.Cmd[1:]...)\n\n\t\t// stderr каждого сервера — в свой лог-файл, чтобы не засорять REPL.\n\t\tvar logFile *os.File\n\t\tif f, err := os.Create(filepath.Join(sourceDir(), spec.Name+\".log\")); err == nil {\n\t\t\tcmd.Stderr = f\n\t\t\tlogFile = f\n\t\t} else {\n\t\t\tcmd.Stderr = os.Stderr\n\t\t}\n\n\t\tsession, err := client.Connect(ctx, \u0026mcp.CommandTransport{Command: cmd}, nil)\n\t\tif err != nil {\n\t\t\tif logFile != nil {\n\t\t\t\t_ = logFile.Close()\n\t\t\t}\n\t\t\tstopAll()\n\t\t\treturn nil, func() {}, fmt.Errorf(\"mcp connect %q: %w\", spec.Name, err)\n\t\t}\n\t\tsess := session\n\t\tlf := logFile\n\t\tstops = append(stops, func() {\n\t\t\t_ = sess.Close()\n\t\t\tif lf != nil {\n\t\t\t\t_ = lf.Close()\n\t\t\t}\n\t\t})\n\n\t\tlt, err := session.ListTools(ctx, nil)\n\t\tif err != nil {\n\t\t\tstopAll()\n\t\t\treturn nil, func() {}, fmt.Errorf(\"mcp tools/list %q: %w\", spec.Name, err)\n\t\t}\n\t\tfor _, t := range lt.Tools {\n\t\t\tif _, dup := m.route[t.Name]; dup {\n\t\t\t\t// коллизия имён между серверами — оставляем первого владельца, предупреждаем.\n\t\t\t\tfmt.Printf(\"[mcp] предупреждение: тул %q есть на нескольких серверах; беру %q\\n\", t.Name, m.origin[t.Name])\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\ttool := oneTool(t)\n\t\t\tm.tools = append(m.tools, tool)\n\t\t\tm.toolsByServer[spec.Name] = append(m.toolsByServer[spec.Name], tool)\n\t\t\tm.route[t.Name] = session\n\t\t\tm.origin[t.Name] = spec.Name\n\t\t\tm.byServer[spec.Name] = append(m.byServer[spec.Name], t.Name)\n\t\t}\n\t}\n\treturn m, stopAll, nil\n}",
+      "tokens": 271
+    },
+    {
+      "chunk_id": "mcptools.go#007-func-mcptools-tools",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func MCPTools.Tools",
+      "text": "func (m *MCPTools) Tools() []anthropic.ToolUnionParam { return m.tools }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "mcptools.go#008-func-mcptools-len",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func MCPTools.Len",
+      "text": "func (m *MCPTools) Len() int                          { return len(m.tools) }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "mcptools.go#009-func-mcptools-catalogtools",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func MCPTools.CatalogTools",
+      "text": "// CatalogTools — стартовый набор для ЛЕНИВОГО режима: один мета-тул load_tools,\n// в описании которого перечислены серверы и их назначение, но БЕЗ полных схем их тулов.\n// Это и есть «каталог серверов», с которого начинает модель (экономия токенов).\nfunc (m *MCPTools) CatalogTools() []anthropic.ToolUnionParam {\n\tvar lines []string\n\tenum := make([]any, 0, len(m.serverOrder))\n\tfor _, s := range m.serverOrder {\n\t\tlines = append(lines, fmt.Sprintf(\"%q — %s (тулов: %d)\", s, m.purpose[s], len(m.toolsByServer[s])))\n\t\tenum = append(enum, s)\n\t}\n\tdesc := \"Загрузить инструменты одного MCP-сервера ПЕРЕД их использованием. \" +\n\t\t\"Сначала загрузи сервер, подходящий под задачу, затем вызывай его тулы. \" +\n\t\t\"Доступные серверы: \" + strings.Join(lines, \"; \") + \".\"\n\ttp := anthropic.ToolParam{\n\t\tName:        LoadToolsName,\n\t\tDescription: anthropic.String(desc),\n\t\tInputSchema: anthropic.ToolInputSchemaParam{\n\t\t\tProperties: map[string]any{\n\t\t\t\t\"server\": map[string]any{\"type\": \"string\", \"enum\": enum, \"description\": \"Имя сервера из каталога\"},\n\t\t\t},\n\t\t\tRequired: []string{\"server\"},\n\t\t},\n\t}\n\treturn []anthropic.ToolUnionParam{{OfTool: \u0026tp}}\n}",
+      "tokens": 137
+    },
+    {
+      "chunk_id": "mcptools.go#010-func-mcptools-loadserver",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func MCPTools.LoadServer",
+      "text": "// LoadServer возвращает схемы тулов запрошенного сервера (для подмешивания в запрос)\n// и текстовое подтверждение для модели. Вызывается, когда модель дёрнула load_tools.\nfunc (m *MCPTools) LoadServer(input json.RawMessage) ([]anthropic.ToolUnionParam, string) {\n\tvar in struct {\n\t\tServer string `json:\"server\"`\n\t}\n\t_ = json.Unmarshal(input, \u0026in)\n\ttools, ok := m.toolsByServer[in.Server]\n\tif !ok {\n\t\treturn nil, fmt.Sprintf(\"нет сервера %q; доступны: %s\", in.Server, strings.Join(m.serverOrder, \", \"))\n\t}\n\treturn tools, fmt.Sprintf(\"загружены инструменты сервера %q: %s. Теперь можешь их вызывать.\",\n\t\tin.Server, strings.Join(m.byServer[in.Server], \", \"))\n}",
+      "tokens": 77
+    },
+    {
+      "chunk_id": "mcptools.go#011-func-appendnewtools",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func appendNewTools",
+      "text": "// appendNewTools добавляет тулы, которых ещё нет (дедуп по имени).\nfunc appendNewTools(existing, added []anthropic.ToolUnionParam) []anthropic.ToolUnionParam {\n\thave := map[string]bool{}\n\tfor _, t := range existing {\n\t\tif t.OfTool != nil {\n\t\t\thave[t.OfTool.Name] = true\n\t\t}\n\t}\n\tfor _, t := range added {\n\t\tif t.OfTool != nil \u0026\u0026 !have[t.OfTool.Name] {\n\t\t\texisting = append(existing, t)\n\t\t\thave[t.OfTool.Name] = true\n\t\t}\n\t}\n\treturn existing\n}",
+      "tokens": 62
+    },
+    {
+      "chunk_id": "mcptools.go#012-func-mcptools-names",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func MCPTools.Names",
+      "text": "// Names — все тулы, отсортированно (для стартового вывода).\nfunc (m *MCPTools) Names() []string {\n\tout := make([]string, 0, len(m.route))\n\tfor n := range m.route {\n\t\tout = append(out, n)\n\t}\n\tsort.Strings(out)\n\treturn out\n}",
+      "tokens": 35
+    },
+    {
+      "chunk_id": "mcptools.go#013-func-mcptools-breakdown",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func MCPTools.Breakdown",
+      "text": "// Breakdown — какие тулы с какого сервера (для стартового вывода).\nfunc (m *MCPTools) Breakdown() string {\n\tservers := make([]string, 0, len(m.byServer))\n\tfor s := range m.byServer {\n\t\tservers = append(servers, s)\n\t}\n\tsort.Strings(servers)\n\tvar parts []string\n\tfor _, s := range servers {\n\t\ttools := append([]string(nil), m.byServer[s]...)\n\t\tsort.Strings(tools)\n\t\tparts = append(parts, fmt.Sprintf(\"%s(%d): %s\", s, len(tools), strings.Join(tools, \", \")))\n\t}\n\treturn strings.Join(parts, \" | \")\n}",
+      "tokens": 66
+    },
+    {
+      "chunk_id": "mcptools.go#014-func-mcptools-call",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func MCPTools.Call",
+      "text": "// Call МАРШРУТИЗИРУЕТ вызов к серверу-владельцу тула.\nfunc (m *MCPTools) Call(ctx context.Context, name string, input json.RawMessage) (string, bool) {\n\tsession, ok := m.route[name]\n\tif !ok {\n\t\treturn \"неизвестный инструмент: \" + name, true\n\t}\n\tvar args map[string]any\n\tif len(input) \u003e 0 {\n\t\tif err := json.Unmarshal(input, \u0026args); err != nil {\n\t\t\treturn \"не разобрал аргументы инструмента: \" + err.Error(), true\n\t\t}\n\t}\n\tres, err := session.CallTool(ctx, \u0026mcp.CallToolParams{Name: name, Arguments: args})\n\tif err != nil {\n\t\treturn fmt.Sprintf(\"ошибка вызова %s: %v\", name, err), true\n\t}\n\treturn mcpResultText(res), res.IsError\n}",
+      "tokens": 88
+    },
+    {
+      "chunk_id": "mcptools.go#015-func-onetool",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func oneTool",
+      "text": "// oneTool конвертирует один MCP-инструмент в формат tools Anthropic.\nfunc oneTool(t *mcp.Tool) anthropic.ToolUnionParam {\n\tprops, required := splitSchema(t.InputSchema)\n\ttp := anthropic.ToolParam{\n\t\tName:        t.Name,\n\t\tDescription: anthropic.String(t.Description),\n\t\tInputSchema: anthropic.ToolInputSchemaParam{Properties: props, Required: required},\n\t}\n\treturn anthropic.ToolUnionParam{OfTool: \u0026tp}\n}",
+      "tokens": 35
+    },
+    {
+      "chunk_id": "mcptools.go#016-func-splitschema",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func splitSchema",
+      "text": "// splitSchema достаёт properties и required из JSON-схемы MCP-инструмента.\n// Properties ВСЕГДА непустой объект: иначе ToolInputSchemaParam считается \"нулевым\"\n// и из-за omitzero выпадает из запроса целиком (API → input_schema: Field required).\nfunc splitSchema(schema any) (props any, required []string) {\n\tvar m map[string]any\n\tswitch v := schema.(type) {\n\tcase map[string]any:\n\t\tm = v\n\tcase json.RawMessage:\n\t\t_ = json.Unmarshal(v, \u0026m)\n\tcase []byte:\n\t\t_ = json.Unmarshal(v, \u0026m)\n\tcase string:\n\t\t_ = json.Unmarshal([]byte(v), \u0026m)\n\t}\n\tif m == nil {\n\t\treturn map[string]any{}, nil\n\t}\n\tif p, ok := m[\"properties\"].(map[string]any); ok {\n\t\tprops = p\n\t} else {\n\t\tprops = map[string]any{}\n\t}\n\tif rs, ok := m[\"required\"].([]any); ok {\n\t\tfor _, r := range rs {\n\t\t\tif s, ok := r.(string); ok {\n\t\t\t\trequired = append(required, s)\n\t\t\t}\n\t\t}\n\t}\n\treturn props, required\n}",
+      "tokens": 129
+    },
+    {
+      "chunk_id": "mcptools.go#017-func-mcpresulttext",
+      "source": "mcptools.go",
+      "file": "mcptools.go",
+      "section": "func mcpResultText",
+      "text": "// mcpResultText склеивает текстовые блоки результата MCP-инструмента.\nfunc mcpResultText(res *mcp.CallToolResult) string {\n\tvar b strings.Builder\n\tfor _, c := range res.Content {\n\t\tif tc, ok := c.(*mcp.TextContent); ok {\n\t\t\tb.WriteString(tc.Text)\n\t\t}\n\t}\n\treturn b.String()\n}",
+      "tokens": 35
+    },
+    {
+      "chunk_id": "memory.go#001-package-main",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "memory.go#002-import",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "import",
+      "text": "import (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"sort\"\n\t\"strings\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n)",
+      "tokens": 10
+    },
+    {
+      "chunk_id": "memory.go#003-type-layer",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "type Layer",
+      "text": "// Layer — тип памяти. Три слоя из задания дня 11.\ntype Layer int",
+      "tokens": 14
+    },
+    {
+      "chunk_id": "memory.go#004-const-shortterm",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "const ShortTerm",
+      "text": "const (\n\tShortTerm Layer = iota // краткосрочная: текущий диалог (сообщения чата)\n\tWorking                // рабочая: TaskContext — данные задачи через сессии\n\tLongTerm               // долговременная: профиль/решения/знания (.md)\n)",
+      "tokens": 27
+    },
+    {
+      "chunk_id": "memory.go#005-func-layer-string",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Layer.String",
+      "text": "func (l Layer) String() string {\n\tswitch l {\n\tcase ShortTerm:\n\t\treturn \"short-term (диалог)\"\n\tcase Working:\n\t\treturn \"working (TaskContext)\"\n\tcase LongTerm:\n\t\treturn \"long-term (профиль)\"\n\tdefault:\n\t\treturn \"unknown\"\n\t}\n}",
+      "tokens": 29
+    },
+    {
+      "chunk_id": "memory.go#006-type-workingmem",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "type WorkingMem",
+      "text": "// WorkingMem — РАБОЧАЯ память = TaskContext. Это НЕ текущий диалог: она про\n// задачу/фичу и живёт через несколько сессий (ресёрч → разработка → тесты).\n// Хранит статус: план, что сделано, текущий шаг, решения по задаче.\ntype WorkingMem struct {\n\tTask         string            `json:\"task\"`\n\tGoal         string            `json:\"goal\"`\n\tState        TaskState         `json:\"state\"`         // этап конечного автомата\n\tPlanApproved bool              `json:\"plan_approved\"` // gate: план утверждён\n\tValidated    bool              `json:\"validated\"`     // gate: валидация пройдена\n\tPlanText     string            `json:\"plan_text\"`     // артефакт этапа planning (для роя/resume)\n\tExecText     string            `json:\"exec_text\"`     // артефакт этапа execution (для роя/resume)\n\tExecStop     string            `json:\"exec_stop\"`     // stop_reason последнего execution\n\tCurrent      string            `json:\"current\"`       // текущий шаг\n\tPlan         []string          `json:\"plan\"`          // что предстоит\n\tDone         []string          `json:\"done\"`          // что выполнено\n\tFacts        map[string]string `json:\"facts\"`         // решения/данные по задаче\n}",
+      "tokens": 118
+    },
+    {
+      "chunk_id": "memory.go#007-func-workingmem-empty",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func WorkingMem.empty",
+      "text": "func (w WorkingMem) empty() bool {\n\treturn w.Task == \"\" \u0026\u0026 w.Current == \"\" \u0026\u0026 len(w.Plan) == 0 \u0026\u0026\n\t\tlen(w.Done) == 0 \u0026\u0026 len(w.Facts) == 0\n}",
+      "tokens": 27
+    },
+    {
+      "chunk_id": "memory.go#008-type-memory",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "type Memory",
+      "text": "// Memory держит ТРИ слоя РАЗДЕЛЬНО, с разным хранилищем:\n//\n//\tshort-term → сообщения чата   (short-term.json)\n//\tworking    → TaskContext      (working.json)\n//\tlong-term  → активный профиль  (из ProfileStore)\ntype Memory struct {\n\tdir string\n\n\tshortTerm []storedMessage // краткосрочная: диалог\n\tworking   WorkingMem      // рабочая: TaskContext\n\tlongDoc   string          // долговременная: markdown-документ\n}",
+      "tokens": 50
+    },
+    {
+      "chunk_id": "memory.go#009-func-newmemory",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func NewMemory",
+      "text": "func NewMemory(dir string) *Memory {\n\treturn \u0026Memory{dir: dir, working: WorkingMem{Facts: map[string]string{}}}\n}",
+      "tokens": 12
+    },
+    {
+      "chunk_id": "memory.go#010-func-memory-dialog",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Dialog",
+      "text": "// Dialog → краткосрочная (диалог). Это делает агент сам в Ask.\nfunc (m *Memory) Dialog(role, content string) {\n\tm.shortTerm = append(m.shortTerm, storedMessage{Role: role, Content: content})\n}",
+      "tokens": 26
+    },
+    {
+      "chunk_id": "memory.go#011-func-memory-settask",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.SetTask",
+      "text": "// --- рабочая (TaskContext) ---\nfunc (m *Memory) SetTask(name, goal string) {\n\tm.working.Task, m.working.Goal = name, goal\n\tif !m.working.State.valid() {\n\t\tm.working.State = StatePlanning\n\t}\n}",
+      "tokens": 25
+    },
+    {
+      "chunk_id": "memory.go#012-func-memory-setplan",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.SetPlan",
+      "text": "func (m *Memory) SetPlan(steps ...string) { m.working.Plan = steps }",
+      "tokens": 10
+    },
+    {
+      "chunk_id": "memory.go#013-func-memory-setcurrent",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.SetCurrent",
+      "text": "func (m *Memory) SetCurrent(step string)  { m.working.Current = step }",
+      "tokens": 10
+    },
+    {
+      "chunk_id": "memory.go#014-func-memory-markdone",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.MarkDone",
+      "text": "func (m *Memory) MarkDone(step string) {\n\tm.working.Done = append(m.working.Done, step)\n\tout := m.working.Plan[:0]\n\tfor _, s := range m.working.Plan {\n\t\tif s != step {\n\t\t\tout = append(out, s)\n\t\t}\n\t}\n\tm.working.Plan = out\n}",
+      "tokens": 35
+    },
+    {
+      "chunk_id": "memory.go#015-func-memory-decide",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Decide",
+      "text": "func (m *Memory) Decide(key, value string) { m.working.Facts[key] = value }",
+      "tokens": 11
+    },
+    {
+      "chunk_id": "memory.go#016-func-memory-state",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.State",
+      "text": "// State возвращает текущий этап задачи.\nfunc (m *Memory) State() TaskState { return m.working.State }",
+      "tokens": 15
+    },
+    {
+      "chunk_id": "memory.go#017-func-memory-approveplan",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.ApprovePlan",
+      "text": "// gate-флаги: условия для переходов\nfunc (m *Memory) ApprovePlan()       { m.working.PlanApproved = true }",
+      "tokens": 14
+    },
+    {
+      "chunk_id": "memory.go#018-func-memory-planapproved",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.PlanApproved",
+      "text": "func (m *Memory) PlanApproved() bool { return m.working.PlanApproved }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "memory.go#019-func-memory-markvalidated",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.MarkValidated",
+      "text": "func (m *Memory) MarkValidated()     { m.working.Validated = true }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "memory.go#020-func-memory-validated",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Validated",
+      "text": "func (m *Memory) Validated() bool    { return m.working.Validated }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "memory.go#021-func-memory-setplantext",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.SetPlanText",
+      "text": "// артефакты этапов (для роя и для resume после паузы)\nfunc (m *Memory) SetPlanText(s string) { m.working.PlanText = s }",
+      "tokens": 20
+    },
+    {
+      "chunk_id": "memory.go#022-func-memory-plantext",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.PlanText",
+      "text": "func (m *Memory) PlanText() string     { return m.working.PlanText }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "memory.go#023-func-memory-setexecartifact",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.SetExecArtifact",
+      "text": "func (m *Memory) SetExecArtifact(text, stop string) {\n\tm.working.ExecText, m.working.ExecStop = text, stop\n}",
+      "tokens": 13
+    },
+    {
+      "chunk_id": "memory.go#024-func-memory-exectext",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.ExecText",
+      "text": "func (m *Memory) ExecText() string { return m.working.ExecText }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "memory.go#025-func-memory-execstop",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.ExecStop",
+      "text": "func (m *Memory) ExecStop() string { return m.working.ExecStop }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "memory.go#026-func-memory-gateerror",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.gateError",
+      "text": "// gateFor возвращает условие, без которого переход from→to запрещён (\"\" если условий нет).\nfunc (m *Memory) gateError(from, to TaskState) error {\n\tif from == StatePlanning \u0026\u0026 to == StateExecution \u0026\u0026 !m.working.PlanApproved {\n\t\treturn fmt.Errorf(\"нельзя в execution: план не утверждён (нужно /approve-plan)\")\n\t}\n\tif from == StateValidation \u0026\u0026 to == StateDone \u0026\u0026 !m.working.Validated {\n\t\treturn fmt.Errorf(\"нельзя в done: валидация не пройдена (нужно /validate-ok)\")\n\t}\n\treturn nil\n}",
+      "tokens": 66
+    },
+    {
+      "chunk_id": "memory.go#027-func-memory-advance",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Advance",
+      "text": "// Advance — детерминированный переход на следующий этап (с контролем в коде).\nfunc (m *Memory) Advance() (TaskState, error) {\n\tto, ok := nextState(m.working.State)\n\tif !ok {\n\t\treturn m.working.State, fmt.Errorf(\"задача уже в состоянии %s — двигаться некуда\", m.working.State)\n\t}\n\tif err := transition(m.working.State, to); err != nil {\n\t\treturn m.working.State, err\n\t}\n\tif err := m.gateError(m.working.State, to); err != nil {\n\t\treturn m.working.State, err\n\t}\n\tm.working.State = to\n\treturn to, nil\n}",
+      "tokens": 71
+    },
+    {
+      "chunk_id": "memory.go#028-func-memory-goto",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Goto",
+      "text": "// Goto — явный переход на конкретный этап (тоже под контролем transitions).\nfunc (m *Memory) Goto(to TaskState) error {\n\tif !to.valid() {\n\t\treturn fmt.Errorf(\"неизвестное состояние %q\", to)\n\t}\n\tif err := transition(m.working.State, to); err != nil {\n\t\treturn err\n\t}\n\tif err := m.gateError(m.working.State, to); err != nil {\n\t\treturn err\n\t}\n\tm.working.State = to\n\treturn nil\n}",
+      "tokens": 58
+    },
+    {
+      "chunk_id": "memory.go#029-func-memory-resettask",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.ResetTask",
+      "text": "// ResetTask очищает рабочую память (задача завершена), не трогая остальное.\nfunc (m *Memory) ResetTask() {\n\tm.working = WorkingMem{Facts: map[string]string{}, State: StatePlanning}\n}",
+      "tokens": 22
+    },
+    {
+      "chunk_id": "memory.go#030-func-memory-setlongdoc",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.SetLongDoc",
+      "text": "// --- долговременная: содержимое приходит из активного профиля ---\nfunc (m *Memory) SetLongDoc(md string) { m.longDoc = md }",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "memory.go#031-type-policy",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "type Policy",
+      "text": "// Policy — какие слои попадут в запрос. Под задачу слои можно выключать.\ntype Policy struct {\n\tProfile    bool // долговременная (активный профиль)\n\tWorking    bool // рабочая (TaskContext)\n\tShortTermN int  // сколько последних реплик диалога взять (0 — ни одной)\n}",
+      "tokens": 41
+    },
+    {
+      "chunk_id": "memory.go#032-func-fullpolicy",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func FullPolicy",
+      "text": "func FullPolicy() Policy { return Policy{Profile: true, Working: true, ShortTermN: 20} }",
+      "tokens": 12
+    },
+    {
+      "chunk_id": "memory.go#033-func-memory-build",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Build",
+      "text": "// Build собирает system-блоки и сообщения из ВЫБРАННЫХ слоёв.\n// long-term и working → System; короткий диалог → messages.\nfunc (m *Memory) Build(query string, p Policy) (system []anthropic.TextBlockParam, msgs []anthropic.MessageParam, used []Layer) {\n\tif p.Profile \u0026\u0026 strings.TrimSpace(m.longDoc) != \"\" {\n\t\tsystem = append(system, anthropic.TextBlockParam{Text: \"[ДОЛГОВРЕМЕННАЯ ПАМЯТЬ — профиль]\\n\" + m.longDoc})\n\t\tused = append(used, LongTerm)\n\t}\n\tif p.Working \u0026\u0026 !m.working.empty() {\n\t\tsystem = append(system, anthropic.TextBlockParam{Text: \"[РАБОЧАЯ ПАМЯТЬ — TaskContext]\\n\" + m.renderWorking()})\n\t\tif m.working.State.valid() {\n\t\t\tsystem = append(system, anthropic.TextBlockParam{Text: fmt.Sprintf(\n\t\t\t\t\"[ЭТАП ЗАДАЧИ]\\nТекущий state: %s.\\nНа этом этапе: %s.\\nРаботай строго в рамках этого этапа, не перепрыгивай вперёд.\",\n\t\t\t\tm.working.State, expectedAction[m.working.State])})\n\t\t}\n\t\tused = append(used, Working)\n\t}\n\n\thist := m.shortTerm\n\tif p.ShortTermN \u003c= 0 {\n\t\thist = nil\n\t} else if len(hist) \u003e p.ShortTermN {\n\t\thist = hist[len(hist)-p.ShortTermN:]\n\t}\n\tif len(hist) \u003e 0 {\n\t\tused = append(used, ShortTerm)\n\t}\n\tfor _, msg := range hist {\n\t\tblock := anthropic.NewTextBlock(msg.Content)\n\t\tif msg.Role == roleAssistant {\n\t\t\tmsgs = append(msgs, anthropic.NewAssistantMessage(block))\n\t\t\tcontinue\n\t\t}\n\t\tmsgs = append(msgs, anthropic.NewUserMessage(block))\n\t}\n\tmsgs = append(msgs, anthropic.NewUserMessage(anthropic.NewTextBlock(query)))\n\treturn system, msgs, used\n}",
+      "tokens": 168
+    },
+    {
+      "chunk_id": "memory.go#034-func-memory-renderworking",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.renderWorking",
+      "text": "func (m *Memory) renderWorking() string {\n\tvar b strings.Builder\n\tif m.working.Task != \"\" {\n\t\tfmt.Fprintf(\u0026b, \"Задача: %s\\n\", m.working.Task)\n\t}\n\tif m.working.Goal != \"\" {\n\t\tfmt.Fprintf(\u0026b, \"Цель: %s\\n\", m.working.Goal)\n\t}\n\tif m.working.State != \"\" {\n\t\tfmt.Fprintf(\u0026b, \"Этап (state): %s — %s\\n\", m.working.State, expectedAction[m.working.State])\n\t\tfmt.Fprintf(\u0026b, \"Gate: план утверждён=%v, валидация пройдена=%v\\n\", m.working.PlanApproved, m.working.Validated)\n\t}\n\tif m.working.Current != \"\" {\n\t\tfmt.Fprintf(\u0026b, \"Текущий шаг: %s\\n\", m.working.Current)\n\t}\n\tif len(m.working.Done) \u003e 0 {\n\t\tfmt.Fprintf(\u0026b, \"Сделано: %s\\n\", strings.Join(m.working.Done, \"; \"))\n\t}\n\tif len(m.working.Plan) \u003e 0 {\n\t\tfmt.Fprintf(\u0026b, \"Осталось: %s\\n\", strings.Join(m.working.Plan, \"; \"))\n\t}\n\tif len(m.working.Facts) \u003e 0 {\n\t\tb.WriteString(\"Решения:\\n\")\n\t\tb.WriteString(renderKV(m.working.Facts))\n\t}\n\treturn b.String()\n}",
+      "tokens": 97
+    },
+    {
+      "chunk_id": "memory.go#035-func-renderkv",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func renderKV",
+      "text": "func renderKV(m map[string]string) string {\n\tkeys := make([]string, 0, len(m))\n\tfor k := range m {\n\t\tkeys = append(keys, k)\n\t}\n\tsort.Strings(keys)\n\tvar b strings.Builder\n\tfor _, k := range keys {\n\t\tfmt.Fprintf(\u0026b, \"- %s: %s\\n\", k, m[k])\n\t}\n\treturn b.String()\n}",
+      "tokens": 42
+    },
+    {
+      "chunk_id": "memory.go#036-func-memory-inspect",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Inspect",
+      "text": "func (m *Memory) Inspect() string {\n\tvar b strings.Builder\n\tfmt.Fprintf(\u0026b, \"%s — %d сообщений\\n\", ShortTerm, len(m.shortTerm))\n\tfor _, msg := range m.shortTerm {\n\t\tfmt.Fprintf(\u0026b, \"    %s: %s\\n\", msg.Role, oneLine(msg.Content, 70))\n\t}\n\tfmt.Fprintf(\u0026b, \"%s — задача %q\\n\", Working, m.working.Task)\n\tif s := strings.TrimRight(m.renderWorking(), \"\\n\"); s != \"\" {\n\t\tfor _, line := range strings.Split(s, \"\\n\") {\n\t\t\tfmt.Fprintf(\u0026b, \"    %s\\n\", line)\n\t\t}\n\t}\n\tfmt.Fprintf(\u0026b, \"%s — %d символов (активный профиль)\\n\", LongTerm, len(m.longDoc))\n\tif s := strings.TrimRight(m.longDoc, \"\\n\"); s != \"\" {\n\t\tfor _, line := range strings.Split(s, \"\\n\") {\n\t\t\tfmt.Fprintf(\u0026b, \"    %s\\n\", line)\n\t\t}\n\t}\n\treturn b.String()\n}",
+      "tokens": 96
+    },
+    {
+      "chunk_id": "memory.go#037-func-memory-save",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.Save",
+      "text": "// Save сохраняет слои, которыми управляет агент: диалог и TaskContext.\n// Долговременный слой здесь = активный профиль, его персистит ProfileStore.\nfunc (m *Memory) Save() error {\n\tif m.dir == \"\" {\n\t\treturn nil\n\t}\n\tif err := os.MkdirAll(m.dir, 0o755); err != nil {\n\t\treturn err\n\t}\n\tif err := writeJSON(filepath.Join(m.dir, \"short-term.json\"), m.shortTerm); err != nil {\n\t\treturn err\n\t}\n\treturn writeJSON(filepath.Join(m.dir, \"working.json\"), m.working)\n}",
+      "tokens": 64
+    },
+    {
+      "chunk_id": "memory.go#038-func-memory-haslongdoc",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.HasLongDoc",
+      "text": "// HasLongDoc — есть ли непустой долговременный документ.\nfunc (m *Memory) HasLongDoc() bool { return strings.TrimSpace(m.longDoc) != \"\" }",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "memory.go#039-func-loadmemory",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func LoadMemory",
+      "text": "func LoadMemory(dir string) (*Memory, error) {\n\tm := NewMemory(dir)\n\t_ = readJSON(filepath.Join(dir, \"short-term.json\"), \u0026m.shortTerm)\n\t_ = readJSON(filepath.Join(dir, \"working.json\"), \u0026m.working)\n\tif m.working.Facts == nil {\n\t\tm.working.Facts = map[string]string{}\n\t}\n\treturn m, nil\n}",
+      "tokens": 32
+    },
+    {
+      "chunk_id": "memory.go#040-func-writejson",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func writeJSON",
+      "text": "func writeJSON(path string, v any) error {\n\tdata, err := json.MarshalIndent(v, \"\", \"  \")\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn writeFile(path, string(data))\n}",
+      "tokens": 26
+    },
+    {
+      "chunk_id": "memory.go#041-func-writefile",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func writeFile",
+      "text": "func writeFile(path, content string) error {\n\ttmp := path + \".tmp\"\n\tif err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {\n\t\treturn err\n\t}\n\treturn os.Rename(tmp, path)\n}",
+      "tokens": 28
+    },
+    {
+      "chunk_id": "memory.go#042-func-readjson",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func readJSON",
+      "text": "func readJSON(path string, v any) error {\n\tdata, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn json.Unmarshal(data, v)\n}",
+      "tokens": 23
+    },
+    {
+      "chunk_id": "memory.go#043-func-oneline",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func oneLine",
+      "text": "func oneLine(s string, max int) string {\n\ts = strings.Join(strings.Fields(s), \" \")\n\tr := []rune(s)\n\tif len(r) \u003c= max {\n\t\treturn s\n\t}\n\treturn string(r[:max-1]) + \"…\"\n}",
+      "tokens": 28
+    },
+    {
+      "chunk_id": "memory.go#044-func-memory-taskname",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.taskName",
+      "text": "// --- аксессоры для интерактивных команд ---\nfunc (m *Memory) taskName() string { return m.working.Task }",
+      "tokens": 16
+    },
+    {
+      "chunk_id": "memory.go#045-func-memory-taskgoal",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.taskGoal",
+      "text": "func (m *Memory) taskGoal() string { return m.working.Goal }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "memory.go#046-func-memory-longdoc",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.LongDoc",
+      "text": "// LongDoc — текущее содержимое долговременного слоя (активный профиль).\nfunc (m *Memory) LongDoc() string { return m.longDoc }",
+      "tokens": 18
+    },
+    {
+      "chunk_id": "memory.go#047-func-memory-taskname",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.TaskName",
+      "text": "// TaskName — имя текущей задачи.\nfunc (m *Memory) TaskName() string { return m.working.Task }",
+      "tokens": 15
+    },
+    {
+      "chunk_id": "memory.go#048-func-memory-taskgoal",
+      "source": "memory.go",
+      "file": "memory.go",
+      "section": "func Memory.TaskGoal",
+      "text": "// TaskGoal — цель текущей задачи.\nfunc (m *Memory) TaskGoal() string { return m.working.Goal }",
+      "tokens": 15
+    },
+    {
+      "chunk_id": "notesserver/main.go#001-package-main",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "notesserver/main.go#002-import",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"log\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"runtime\"\n\t\"sort\"\n\t\"strings\"\n\n\t\"github.com/modelcontextprotocol/go-sdk/mcp\"\n)",
+      "tokens": 13
+    },
+    {
+      "chunk_id": "notesserver/main.go#003-func-main",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func main",
+      "text": "// День 20. Второй MCP-сервер ДРУГОЙ природы — файловое хранилище (\"notes\").\n// Не знает ничего про погоду: принимает текст и работает с файлами в каталоге notes/.\n// Демонстрирует оркестрацию тулов с РАЗНЫХ серверов: данные приходят с weatherserver,\n// сохранение/чтение — здесь. Транспорт stdio (отдельный сабпроцесс агента).\nfunc main() {\n\ts := mcp.NewServer(\u0026mcp.Implementation{Name: \"notes-mcp\", Version: \"0.1.0\"}, nil)\n\n\t// save_to_file — сохранить переданный текст в файл.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"save_to_file\",\n\t\tDescription: \"Сохранить текст в файл в каталоге notes/. Возвращает путь к файлу.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\n\t\t\t\t\"filename\":{\"type\":\"string\",\"description\":\"Имя файла, напр. 'trip.txt'\"},\n\t\t\t\t\"content\":{\"type\":\"string\",\"description\":\"Содержимое для сохранения\"}\n\t\t\t},\n\t\t\t\"required\":[\"filename\",\"content\"]\n\t\t}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tFilename string `json:\"filename\"`\n\t\t\tContent  string `json:\"content\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errText(err), nil\n\t\t}\n\t\tpath, err := writeNote(in.Filename, in.Content)\n\t\tif err != nil {\n\t\t\treturn errText(err), nil\n\t\t}\n\t\treturn okText(fmt.Sprintf(\"сохранено: %s (%d байт)\", path, len(in.Content))), nil\n\t})\n\n\t// read_file — прочитать ранее сохранённый файл.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"read_file\",\n\t\tDescription: \"Прочитать файл из каталога notes/ и вернуть его содержимое.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\"filename\":{\"type\":\"string\",\"description\":\"Имя файла\"}},\n\t\t\t\"required\":[\"filename\"]\n\t\t}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tFilename string `json:\"filename\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errText(err), nil\n\t\t}\n\t\tdata, err := readNote(in.Filename)\n\t\tif err != nil {\n\t\t\treturn errText(err), nil\n\t\t}\n\t\treturn okText(data), nil\n\t})\n\n\t// list_files — список сохранённых файлов.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"list_files\",\n\t\tDescription: \"Список файлов в каталоге notes/.\",\n\t\tInputSchema: json.RawMessage(`{\"type\":\"object\"}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tnames, err := listNotes()\n\t\tif err != nil {\n\t\t\treturn errText(err), nil\n\t\t}\n\t\tif len(names) == 0 {\n\t\t\treturn okText(\"файлов пока нет\"), nil\n\t\t}\n\t\treturn okText(strings.Join(names, \"\\n\")), nil\n\t})\n\n\t// delete_file — удалить файл.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"delete_file\",\n\t\tDescription: \"Удалить файл из каталога notes/.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\"filename\":{\"type\":\"string\",\"description\":\"Имя файла\"}},\n\t\t\t\"required\":[\"filename\"]\n\t\t}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tFilename string `json:\"filename\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errText(err), nil\n\t\t}\n\t\tif err := deleteNote(in.Filename); err != nil {\n\t\t\treturn errText(err), nil\n\t\t}\n\t\treturn okText(\"удалено: \" + in.Filename), nil\n\t})\n\n\tif err := s.Run(context.Background(), \u0026mcp.StdioTransport{}); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}",
+      "tokens": 356
+    },
+    {
+      "chunk_id": "notesserver/main.go#004-func-notesdir",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func notesDir",
+      "text": "func notesDir() (string, error) {\n\tdir := filepath.Join(sourceDir(), \"notes\")\n\treturn dir, os.MkdirAll(dir, 0o755)\n}",
+      "tokens": 14
+    },
+    {
+      "chunk_id": "notesserver/main.go#005-func-safename",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func safeName",
+      "text": "// safeName очищает имя файла от путей (защита от traversal).\nfunc safeName(filename string) (string, error) {\n\tname := filepath.Base(strings.TrimSpace(filename))\n\tif name == \"\" || name == \".\" || name == \"..\" || strings.ContainsAny(name, `/\\`) {\n\t\treturn \"\", fmt.Errorf(\"недопустимое имя файла: %q\", filename)\n\t}\n\treturn name, nil\n}",
+      "tokens": 47
+    },
+    {
+      "chunk_id": "notesserver/main.go#006-func-writenote",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func writeNote",
+      "text": "func writeNote(filename, content string) (string, error) {\n\tname, err := safeName(filename)\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdir, err := notesDir()\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tpath := filepath.Join(dir, name)\n\tif err := os.WriteFile(path, []byte(content), 0o644); err != nil {\n\t\treturn \"\", err\n\t}\n\treturn path, nil\n}",
+      "tokens": 55
+    },
+    {
+      "chunk_id": "notesserver/main.go#007-func-readnote",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func readNote",
+      "text": "func readNote(filename string) (string, error) {\n\tname, err := safeName(filename)\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdir, err := notesDir()\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdata, err := os.ReadFile(filepath.Join(dir, name))\n\tif err != nil {\n\t\treturn \"\", fmt.Errorf(\"не прочитать %s: %w\", name, err)\n\t}\n\treturn string(data), nil\n}",
+      "tokens": 55
+    },
+    {
+      "chunk_id": "notesserver/main.go#008-func-listnotes",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func listNotes",
+      "text": "func listNotes() ([]string, error) {\n\tdir, err := notesDir()\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tentries, err := os.ReadDir(dir)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tvar names []string\n\tfor _, e := range entries {\n\t\tif !e.IsDir() {\n\t\t\tnames = append(names, e.Name())\n\t\t}\n\t}\n\tsort.Strings(names)\n\treturn names, nil\n}",
+      "tokens": 55
+    },
+    {
+      "chunk_id": "notesserver/main.go#009-func-deletenote",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func deleteNote",
+      "text": "func deleteNote(filename string) error {\n\tname, err := safeName(filename)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdir, err := notesDir()\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn os.Remove(filepath.Join(dir, name))\n}",
+      "tokens": 33
+    },
+    {
+      "chunk_id": "notesserver/main.go#010-func-sourcedir",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func sourceDir",
+      "text": "func sourceDir() string {\n\tif _, file, _, ok := runtime.Caller(0); ok {\n\t\treturn filepath.Dir(file)\n\t}\n\treturn \".\"\n}",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "notesserver/main.go#011-func-oktext",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func okText",
+      "text": "func okText(s string) *mcp.CallToolResult {\n\treturn \u0026mcp.CallToolResult{Content: []mcp.Content{\u0026mcp.TextContent{Text: s}}}\n}",
+      "tokens": 10
+    },
+    {
+      "chunk_id": "notesserver/main.go#012-func-errtext",
+      "source": "notesserver/main.go",
+      "file": "main.go",
+      "section": "func errText",
+      "text": "func errText(err error) *mcp.CallToolResult {\n\treturn \u0026mcp.CallToolResult{IsError: true, Content: []mcp.Content{\u0026mcp.TextContent{Text: \"ошибка: \" + err.Error()}}}\n}",
+      "tokens": 15
+    },
+    {
+      "chunk_id": "pipeline.go#001-package-main",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "pipeline.go#002-import",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "import",
+      "text": "import (\n\t\"bufio\"\n\t\"context\"\n\t\"fmt\"\n\t\"strings\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n)",
+      "tokens": 8
+    },
+    {
+      "chunk_id": "pipeline.go#003-type-pipeline",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "type Pipeline",
+      "text": "// Pipeline прогоняет задачу по этапам planning → execution → validation → done\n// ДЕТЕРМИНИРОВАННО (переходы в коде). Опционально ставит паузу и спрашивает юзера\n// перед каждым переходом (confirm-режим).\ntype Pipeline struct {\n\tagent           *Agent\n\tconfirm         bool\n\tin              *bufio.Reader // источник подтверждений (stdin в чате)\n\tswarm           *Swarm        // рой ревьюеров на validation (опц.)\n\tlastPlan        string        // артефакт planning (для роя)\n\tlastExec        string        // артефакт execution (для роя)\n\tuserQuery       string        // исходный запрос (для оркестратора)\n\treworkLeft      int           // сколько кругов доработки validation→execution ещё разрешено\n\treworkExhausted bool          // лимит доработки исчерпан → пауза, ждём решение человека\n\tlastStop        string        // stop_reason последнего ответа execution (для проверки обрыва)\n}",
+      "tokens": 105
+    },
+    {
+      "chunk_id": "pipeline.go#004-const-defaultreworkrounds",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "const defaultReworkRounds",
+      "text": "const defaultReworkRounds = 2",
+      "tokens": 4
+    },
+    {
+      "chunk_id": "pipeline.go#005-func-newpipeline",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "func NewPipeline",
+      "text": "func NewPipeline(agent *Agent, confirm bool, in *bufio.Reader) *Pipeline {\n\treturn \u0026Pipeline{agent: agent, confirm: confirm, in: in, reworkLeft: defaultReworkRounds}\n}",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "pipeline.go#006-func-pipeline-enableswarm",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "func Pipeline.EnableSwarm",
+      "text": "// EnableSwarm включает рой ревьюеров на этапе validation.\nfunc (p *Pipeline) EnableSwarm(s *Swarm) { p.swarm = s }",
+      "tokens": 18
+    },
+    {
+      "chunk_id": "pipeline.go#007-func-stagequery",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "func stageQuery",
+      "text": "// stageQuery — что просим у модели на каждом этапе для данной задачи.\nfunc stageQuery(state TaskState, task string) string {\n\tswitch state {\n\tcase StatePlanning:\n\t\treturn fmt.Sprintf(\"Задача: %s. Составь короткий план (3–5 шагов). Только план, без кода.\", task)\n\tcase StateExecution:\n\t\treturn \"Выполни план по шагам и дай результат (код/артефакт).\"\n\tcase StateValidation:\n\t\treturn \"Проверь результат на соответствие плану. Кратко: что ок, что нет.\"\n\tdefault:\n\t\treturn \"\"\n\t}\n}",
+      "tokens": 67
+    },
+    {
+      "chunk_id": "pipeline.go#008-func-pipeline-run",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "func Pipeline.Run",
+      "text": "// Run прогоняет автомат от текущего state до done.\n// Возвращает true, если дошли до done; false — если поставлено на паузу.\nfunc (p *Pipeline) Run(ctx context.Context) (bool, error) {\n\tmem := p.agent.Memory()\n\tfor {\n\t\tstate := mem.State()\n\t\tif state == StateDone {\n\t\t\tfmt.Println(\"[pipeline] задача в состоянии done — завершено.\")\n\t\t\treturn true, nil\n\t\t}\n\n\t\tq := stageQuery(state, mem.TaskName())\n\t\tif p.userQuery == \"\" {\n\t\t\tp.userQuery = mem.TaskName()\n\t\t}\n\t\tfmt.Printf(\"\\n[этап %s] %s\\n\", state, expectedAction[state])\n\t\tfmt.Printf(\"[запрос] %s\\n\", q)\n\t\treply, err := p.agent.Ask(ctx, q, FullPolicy())\n\t\tif err != nil {\n\t\t\treturn false, err\n\t\t}\n\t\tfmt.Println(reply.Text)\n\n\t\t// запоминаем артефакты этапов и выставляем gate-флаги\n\t\tswitch state {\n\t\tcase StatePlanning:\n\t\t\tp.lastPlan = reply.Text\n\t\t\tmem.SetPlanText(reply.Text)\n\t\t\tif p.swarm != nil \u0026\u0026 p.swarm.Stage() == StatePlanning {\n\t\t\t\tif err := p.runSwarmPlanning(ctx); err != nil {\n\t\t\t\t\treturn false, err\n\t\t\t\t}\n\t\t\t}\n\t\t\tmem.ApprovePlan() // план утверждён (после роя, если он был)\n\t\tcase StateExecution:\n\t\t\tp.lastExec = reply.Text\n\t\t\tp.lastStop = reply.StopReason\n\t\t\tmem.SetExecArtifact(reply.Text, reply.StopReason)\n\t\tcase StateValidation:\n\t\t\tif p.swarm != nil \u0026\u0026 p.swarm.Stage() == StateValidation {\n\t\t\t\tif err := p.runSwarm(ctx); err != nil {\n\t\t\t\t\treturn false, err\n\t\t\t\t}\n\t\t\t} else {\n\t\t\t\tmem.MarkValidated()\n\t\t\t}\n\t\t}\n\n\t\t// лимит доработки исчерпан → пауза (вариант A): сохраняем состояние и выходим\n\t\tif p.reworkExhausted {\n\t\t\tfmt.Println(\"[pipeline] пауза: доработка не сходится. Состояние сохранено; нужно решение человека.\")\n\t\t\t_ = mem.Save()\n\t\t\treturn false, nil\n\t\t}\n\n\t\tto, ok := nextState(state)\n\t\tif !ok {\n\t\t\treturn true, nil\n\t\t}\n\n\t\t// пауза + подтверждение перед детерминированным переходом\n\t\tif p.confirm {\n\t\t\tok, paused := p.askConfirm(state, to)\n\t\t\tif paused {\n\t\t\t\tfmt.Printf(\"[pipeline] пауза на этапе %s. Состояние сохранено; продолжить позже.\\n\", state)\n\t\t\t\t_ = mem.Save()\n\t\t\t\treturn false, nil\n\t\t\t}\n\t\t\tif !ok {\n\t\t\t\t// не подтвердил переход вперёд: на validation можно вернуть в execution\n\t\t\t\tif state == StateValidation {\n\t\t\t\t\tif err := mem.Goto(StateExecution); err == nil {\n\t\t\t\t\t\tfmt.Println(\"[pipeline] возвращаюсь в execution для доработки.\")\n\t\t\t\t\t\t_ = mem.Save()\n\t\t\t\t\t\tcontinue\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tfmt.Println(\"[pipeline] переход отклонён; остаюсь на текущем этапе (пауза).\")\n\t\t\t\t_ = mem.Save()\n\t\t\t\treturn false, nil\n\t\t\t}\n\t\t}\n\n\t\tnewState, err := mem.Advance() // детерминированный переход с контролем в коде\n\t\tif err != nil {\n\t\t\treturn false, err\n\t\t}\n\t\tfmt.Printf(\"[переход] %s → %s\\n\", state, newState)\n\t\t_ = mem.Save()\n\t}\n}",
+      "tokens": 341
+    },
+    {
+      "chunk_id": "pipeline.go#009-func-pipeline-runswarm",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "func Pipeline.runSwarm",
+      "text": "// runSwarm запускает рой ревьюеров + оркестратора на этапе validation.\n// Если оркестратор не пропустил — gate Validated НЕ ставится (в done не уйдём).\nfunc (p *Pipeline) runSwarm(ctx context.Context) error {\n\t// после resume (пауза → новый процесс) поля пайплайна пусты — берём артефакты из памяти\n\tmem := p.agent.Memory()\n\tif p.lastExec == \"\" {\n\t\tp.lastExec, p.lastStop = mem.ExecText(), mem.ExecStop()\n\t}\n\tif p.lastPlan == \"\" {\n\t\tp.lastPlan = mem.PlanText()\n\t}\n\t// Лёгкий детерминированный гейт ПЕРЕД роем: ловит ТОЛЬКО объективный обрыв/пустоту\n\t// (stop_reason=max_tokens или незакрытый блок кода). Отсутствие кода — НЕ ошибка:\n\t// бывают задачи без кода (план/анализ/доки), их по сути проверяет рой.\n\tif chk := CheckResult(p.lastExec, p.lastStop); !chk.OK {\n\t\tfmt.Printf(\"\\n[проверка результата] неполный результат — %s\\n\", chk.Reason)\n\t\tif p.reworkLeft \u003c= 0 {\n\t\t\tp.reworkExhausted = true\n\t\t\tfmt.Printf(\"  не сошлось за %d круга доработки — СТОП.\\n\", defaultReworkRounds)\n\t\t\tfmt.Println(\"  [пауза] результат неполный; решение человека (дореализовать / сузить / закрыть).\")\n\t\t\treturn nil\n\t\t}\n\t\tp.reworkLeft--\n\t\tfmt.Printf(\"  рой не запускаю (результат неполный) → возврат в execution (осталось кругов: %d).\\n\", p.reworkLeft)\n\t\t_ = p.agent.Memory().Goto(StateExecution)\n\t\treturn nil\n\t}\n\tfmt.Println(\"\\n[проверка результата] OK — результат полный, передаю рою на содержательную проверку.\")\n\tfmt.Println(\"[рой] запускаю ревьюеров на validation…\")\n\tfmt.Printf(\"  [вход роя] план: %s\\n\", oneLine(p.lastPlan, 160))\n\tfmt.Printf(\"  [вход роя] результат: %s\\n\", oneLine(p.lastExec, 160))\n\treviews, err := p.swarm.Review(ctx, p.lastPlan, p.lastExec)\n\tif err != nil {\n\t\treturn err\n\t}\n\tfor _, r := range reviews {\n\t\tfmt.Printf(\"  [ревьюер: %s] %s — %s\\n\", r.Name, r.Verdict, r.Notes)\n\t}\n\tfmt.Printf(\"  [вход оркестратора] запрос юзера: %q + мнения %d ревьюеров\\n\", p.userQuery, len(reviews))\n\tpassed, summary, err := p.swarm.Orchestrate(ctx, p.userQuery, reviews)\n\tif err != nil {\n\t\treturn err\n\t}\n\tfmt.Printf(\"  [оркестратор] PASS=%v — %s\\n\", passed, summary)\n\tif passed {\n\t\tp.agent.Memory().MarkValidated()\n\t\treturn nil\n\t}\n\t// не прошло: тратим круг доработки; если круги исчерпаны — пауза, а не бесконечный цикл\n\tif p.reworkLeft \u003c= 0 {\n\t\tp.reworkExhausted = true\n\t\tfmt.Printf(\"  [рой] замечания не устранены за %d круга доработки — СТОП.\\n\", defaultReworkRounds)\n\t\tfmt.Println(\"  [пауза] доработка не сходится; нужно решение человека (дореализовать / сузить план / закрыть).\")\n\t\treturn nil\n\t}\n\tp.reworkLeft--\n\tfmt.Printf(\"  [рой] есть замечания → возврат в execution на доработку (осталось кругов: %d).\\n\", p.reworkLeft)\n\t_ = p.agent.Memory().Goto(StateExecution)\n\treturn nil\n}",
+      "tokens": 343
+    },
+    {
+      "chunk_id": "pipeline.go#010-func-pipeline-runswarmplanning",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "func Pipeline.runSwarmPlanning",
+      "text": "// runSwarmPlanning запускает рой на этапе planning: ревьюеры оценивают ПЛАН,\n// оркестратор сводит мнения (план принимается/дорабатывается перед execution).\nfunc (p *Pipeline) runSwarmPlanning(ctx context.Context) error {\n\tfmt.Println(\"\\n[рой] запускаю планировщиков-ревьюеров на planning…\")\n\tfmt.Printf(\"  [вход роя] план: %s\\n\", oneLine(p.lastPlan, 160))\n\treviews, err := p.swarm.Review(ctx, p.lastPlan, \"\")\n\tif err != nil {\n\t\treturn err\n\t}\n\tfor _, r := range reviews {\n\t\tfmt.Printf(\"  [ревьюер: %s] %s — %s\\n\", r.Name, r.Verdict, r.Notes)\n\t}\n\tfmt.Printf(\"  [вход оркестратора] запрос юзера: %q + мнения %d ревьюеров\\n\", p.userQuery, len(reviews))\n\tpassed, summary, err := p.swarm.Orchestrate(ctx, p.userQuery, reviews)\n\tif err != nil {\n\t\treturn err\n\t}\n\tfmt.Printf(\"  [оркестратор] план принят=%v — %s\\n\", passed, summary)\n\treturn nil\n}",
+      "tokens": 106
+    },
+    {
+      "chunk_id": "pipeline.go#011-func-pipeline-askconfirm",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "func Pipeline.askConfirm",
+      "text": "// askConfirm спрашивает юзера: продолжить переход, нет, или пауза.\n// returns (proceed, paused).\nfunc (p *Pipeline) askConfirm(from, to TaskState) (bool, bool) {\n\tif p.in == nil {\n\t\treturn true, false\n\t}\n\tfmt.Printf(\"[confirm] этап %s завершён. Перейти к %s? [y = да / n = доработать / pause]: \", from, to)\n\tline, err := p.in.ReadString('\\n')\n\tif err != nil {\n\t\treturn false, true\n\t}\n\tswitch strings.ToLower(strings.TrimSpace(line)) {\n\tcase \"y\", \"yes\", \"да\", \"\":\n\t\treturn true, false\n\tcase \"pause\", \"p\", \"пауза\":\n\t\treturn false, true\n\tdefault:\n\t\treturn false, false\n\t}\n}",
+      "tokens": 87
+    },
+    {
+      "chunk_id": "pipeline.go#012-var",
+      "source": "pipeline.go",
+      "file": "pipeline.go",
+      "section": "var _",
+      "text": "var _ = anthropic.ModelClaudeOpus4_8",
+      "tokens": 4
+    },
+    {
+      "chunk_id": "profile.go#001-package-main",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "profile.go#002-import",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "import",
+      "text": "import (\n\t\"os\"\n\t\"path/filepath\"\n\t\"sort\"\n\t\"strings\"\n)",
+      "tokens": 7
+    },
+    {
+      "chunk_id": "profile.go#003-type-profile",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "type Profile",
+      "text": "// Profile — профиль пользователя: предпочтения (стиль, формат, ограничения).\n// Хранится как редактируемый markdown (как long-term-слой из дня 11), но теперь\n// профилей МНОГО и между ними можно переключаться.\ntype Profile struct {\n\tID  string\n\tDoc string // markdown с предпочтениями\n}",
+      "tokens": 42
+    },
+    {
+      "chunk_id": "profile.go#004-func-profile-empty",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "func Profile.empty",
+      "text": "func (p Profile) empty() bool { return strings.TrimSpace(p.Doc) == \"\" }",
+      "tokens": 11
+    },
+    {
+      "chunk_id": "profile.go#005-type-profilestore",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "type ProfileStore",
+      "text": "// ProfileStore хранит профили РАЗДЕЛЬНО: каждый — свой файл \u003cid\u003e.md в каталоге.\n// Плюс есть встроенные демо-профили (none / junior / senior-go).\ntype ProfileStore struct {\n\tdir     string\n\tbuiltin map[string]string\n}",
+      "tokens": 31
+    },
+    {
+      "chunk_id": "profile.go#006-func-newprofilestore",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "func NewProfileStore",
+      "text": "func NewProfileStore(dir string) *ProfileStore {\n\treturn \u0026ProfileStore{dir: dir, builtin: builtinProfiles()}\n}",
+      "tokens": 11
+    },
+    {
+      "chunk_id": "profile.go#007-func-profilestore-load",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "func ProfileStore.Load",
+      "text": "// Load берёт профиль по id: сначала файл \u003cid\u003e.md, иначе встроенный.\nfunc (s *ProfileStore) Load(id string) (Profile, error) {\n\tif s.dir != \"\" {\n\t\tif data, err := os.ReadFile(filepath.Join(s.dir, id+\".md\")); err == nil {\n\t\t\treturn Profile{ID: id, Doc: string(data)}, nil\n\t\t}\n\t}\n\tif doc, ok := s.builtin[id]; ok {\n\t\treturn Profile{ID: id, Doc: doc}, nil\n\t}\n\treturn Profile{ID: id}, os.ErrNotExist\n}",
+      "tokens": 61
+    },
+    {
+      "chunk_id": "profile.go#008-func-profilestore-list",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "func ProfileStore.List",
+      "text": "// List — доступные id (встроенные + файлы в каталоге), без дублей.\nfunc (s *ProfileStore) List() []string {\n\tseen := map[string]bool{}\n\tvar ids []string\n\tfor id := range s.builtin {\n\t\tif !seen[id] {\n\t\t\tseen[id] = true\n\t\t\tids = append(ids, id)\n\t\t}\n\t}\n\tif s.dir != \"\" {\n\t\tentries, _ := os.ReadDir(s.dir)\n\t\tfor _, e := range entries {\n\t\t\tif strings.HasSuffix(e.Name(), \".md\") {\n\t\t\t\tid := strings.TrimSuffix(e.Name(), \".md\")\n\t\t\t\tif !seen[id] {\n\t\t\t\t\tseen[id] = true\n\t\t\t\t\tids = append(ids, id)\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\tsort.Strings(ids)\n\treturn ids\n}",
+      "tokens": 84
+    },
+    {
+      "chunk_id": "profile.go#009-func-profilestore-save",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "func ProfileStore.Save",
+      "text": "// Save пишет профиль в \u003cid\u003e.md (пользователь может потом править руками).\nfunc (s *ProfileStore) Save(p Profile) error {\n\tif s.dir == \"\" {\n\t\treturn nil\n\t}\n\tif err := os.MkdirAll(s.dir, 0o755); err != nil {\n\t\treturn err\n\t}\n\treturn os.WriteFile(filepath.Join(s.dir, p.ID+\".md\"), []byte(p.Doc), 0o644)\n}",
+      "tokens": 44
+    },
+    {
+      "chunk_id": "profile.go#010-func-builtinprofiles",
+      "source": "profile.go",
+      "file": "profile.go",
+      "section": "func builtinProfiles",
+      "text": "// builtinProfiles — демо-профили для -report и первого запуска.\nfunc builtinProfiles() map[string]string {\n\treturn map[string]string{\n\t\t\"none\": \"\",\n\t\t\"junior\": `# Профиль: Junior-разработчик\n- Уровень: начинающий\n- Стиль: дружелюбно, простыми словами, без жаргона\n- Формат: пошагово, с маленьким примером кода\n- Ограничения: объясняй базовые термины, не предполагай глубоких знаний\n`,\n\t\t\"senior-go\": `# Профиль: Senior Go-разработчик\n- Уровень: senior (распределённые системы)\n- Стиль: кратко и по делу, без воды\n- Формат: сразу суть + идиоматичный Go-пример, отметить trade-offs\n- Ограничения: язык Go; минимум зависимостей; не объяснять азы\n`,\n\t}\n}",
+      "tokens": 87
+    },
+    {
+      "chunk_id": "profiles/junior.md#001-junior",
+      "source": "profiles/junior.md",
+      "file": "junior.md",
+      "section": "Профиль: Junior-разработчик",
+      "text": "# Профиль: Junior-разработчик\n- Уровень: начинающий\n- Стиль: дружелюбно, простыми словами, без жаргона\n- Формат: пошагово, с маленьким примером кода\n- Ограничения: объясняй базовые термины, не предполагай глубоких знаний",
+      "tokens": 29
+    },
+    {
+      "chunk_id": "profiles/senior-go.md#001-senior-go",
+      "source": "profiles/senior-go.md",
+      "file": "senior-go.md",
+      "section": "Профиль: Senior Go-разработчик",
+      "text": "# Профиль: Senior Go-разработчик\n- Уровень: senior (распределённые системы)\n- Стиль: кратко и по делу, без воды\n- Формат: сразу суть + идиоматичный Go-пример, отметить trade-offs\n- Ограничения: язык Go; минимум зависимостей; не объяснять азы",
+      "tokens": 35
+    },
+    {
+      "chunk_id": "readme.md#001-21-rag",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "День 21 — Индексация документов (RAG)",
+      "text": "# День 21 — Индексация документов (RAG)\n\nПайплайн индексации документов под RAG: корпус → **две стратегии chunking** → эмбеддинги (Ollama `nomic-embed-text`) → **JSON-индекс с метаданными на каждый чанк** → **сравнение стратегий**. Реализован как отдельный `package main` в каталоге `ragindex/` — накопительный агент дня 20 не трогается. Индекс сразу спроектирован под будущую обёртку **MCP-тулом семантического поиска** (метод `Index.Search`).\n\n---",
+      "tokens": 58
+    },
+    {
+      "chunk_id": "readme.md#002-x",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Задание (дословно)",
+      "text": "## Задание (дословно)\n\n\u003e 🔥 **День 21. Индексация документов**\n\u003e\n\u003e Возьмите набор документов:\n\u003e 👉 README / статьи / код / pdf → текст\n\u003e 👉 минимум 20–30 страниц текста суммарно (или эквивалент в коде)\n\u003e\n\u003e Реализуйте пайплайн индексации:\n\u003e 👉 разбиение на чанки (chunking)\n\u003e 👉 генерация эмбеддингов\n\u003e 👉 сохранение индекса (FAISS / SQLite / JSON)\n\u003e\n\u003e Усиление:\n\u003e 👉 добавьте метаданные к каждому чанку (source, title/file, section, chunk_id)\n\u003e 👉 сделайте минимум 2 стратегии chunking и сравните их:\n\u003e – по фиксированному размеру\n\u003e – по структуре (заголовки/разделы/файлы)\n\u003e\n\u003e **Результат:** локальный индекс документов с эмбеддингами + метаданные + сравнение 2 стратегий\n\u003e **Формат:** Видео + Код\n\u003e P.S. Дублируем видео ссылкой — https://disk.yandex.ru/i/01KhOD_G7dBWPw\n\n---",
+      "tokens": 121
+    },
+    {
+      "chunk_id": "readme.md#003-21",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Выжимка из чата (день 21)",
+      "text": "## Выжимка из чата (день 21)\n\n- **Posse:** можно ли делать эмбеддинг «на коленке» без нейросети. **Temi4:** в принципе можно, важна хорошая обвязка из ограничений — но лекция как дефолт тянет именно `nomic-embed-text` через Ollama, его и берём.\n- **Anastasiya:** обязательна ли локальная llama. По сути опционально (эмбеддер можно свапнуть на облачный), но в лекции локальный Ollama — дефолт.\n- Несколько участников вылетели из чата (кикают), видео остаётся в геткурсе.\n\nНаши зафиксированные решения по реализации:\n- Порт на **Go**, к Ollama — **чистый `net/http`** (без внешних SDK; профиль «минимум зависимостей»), с возможностью свапнуть на OpenAI/Voyage за интерфейсом `Embedder`.\n- Индекс — **JSON**; метаданные на чанк: `source`, `file` (title), `section`, `chunk_id`.\n- **Две стратегии**: `fixed-size + overlap` **vs** `structural` (заголовки/декларации/файлы) + **сравнение**.\n- Корпус по умолчанию — **исходники самого агента** (task-21: `.go` + `.md`): «эквивалент в коде» ≥ 20–30 страниц, без NDA-рисков. `-docs` можно навести на любой репозиторий.\n- **Реранкинг — отдельный будущий день**, здесь не делаем (в индексе только bi-encoder/первый этап отбора).\n\n---",
+      "tokens": 163
+    },
+    {
+      "chunk_id": "readme.md#004-rag",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Конспект лекции (RAG)",
+      "text": "## Конспект лекции (RAG)\n\n**RAG (Retrieval Augmented Generation)** — паттерн заземления ответов LLM на внешних знаниях **на этапе инференса**.\n\n**RAG vs MCP (формулировка Алексея).** MCP — внешние источники/данные («датчик», дёргается как тул). RAG — внутренние знания, заранее уложенные в базу знаний и подгружаемые на инференсе; это не вызов инструмента, а подмешивание найденного контекста в промпт.\n\n**Before RAG — лимиты.** Context, performance, incorrect data response, отсутствие проверяемых источников. Пример: на вопрос «какая у нас политика code review?» модель уверенно отвечает «обычно 1 апрув, в течение недели» — **галлюцинация без источника**.\n\n**After RAG.** На тот же вопрос — «нужно ≥ 2 апрува до мёржа, максимум 24 часа» + ссылка `confluence/engineering/code-review-policy.md`. Ответ заземлён и проверяем.\n\n**Матрица оптимизаций.** Ось Y — *context optimization* (что модель **знает**), ось X — *LLM optimization* (как модель **действует**). Квадранты: `prompt engineering` → `RAG` (вверх) и `fine-tuning` (вправо), `all of the above` (вверх-вправо). Подходы **additive, не exclusive**: start → prompt engineering → evaluate gaps → RAG (in-context память) или fine-tuning (learned-память), при необходимости стэкаются.\n\n**Where.** Корпоративные базы знаний (чаты/вики/любой контент); закрытые данные, которые не хочется «светить»; узкоспециализированные агенты; глобальный анализ трендов; цифровой двойник.\n\n**Pipeline.** `question → embeddings → retrieval → combine with prompt → chat completion`. Пример со слайда: «What is the population of Canada?» → retrieval по документам → найденный Content подмешивается в промпт → ответ с конкретной цифрой и датой.\n\n**Generative model vs Embedding model.**\n- Generative: генерирует новый текст, понимает контекст/строит фразы, текст→текст, для ответов на вопросы (ChatGPT, Claude, YandexGPT, LLama3…).\n- Embedding: кодирует текст в вектор, ловит семантические связи, текст→**вектор**, для поиска похожих текстов (Ollama, OpenAI API, Voyage AI, Jina.ai).\n\n**Таблица эмбеддеров.** `nomic-embed-text` (Ollama, 768, free) · `text-embedding-3-large` (OpenAI, 3072, very accurate) · `voyage-large-3` (Voyage, 1536, top-tier) · `jina-embeddings-v3` (Jina, 1024, multilanguage) · `gte-base` (HF, 768, free). Vector size: «кот» → `[0.1, -0.34, 0.88, …]` (768 чисел); «собака» → близкий вектор (семантика).\n\n**Embeddings deep dive** (как из текста получается вектор):\n`Input Text → Tokenization → Embedding Layer → Transformer Layer → Pulling → Vector`.\n- Tokenization: `\"SpaceX was founded in 2002\"` → `[\"Space\",\"X\",\" was\",\" founded\",\" in\",\" 2002\"]`.\n- Embedding Layer: каждому токену сопоставляется вектор (`\"Space\" → [0.2, 0.8, -0.4, …]`).\n- Transformer Layer: контекст через внимание `Attention(Q,K,V) = softmax(QKᵀ/√dₖ)·V`.\n- Pulling (pooling): усреднение векторов токенов в один вектор предложения (`mean = [(…)/3, …]`).\n- Vector: финальный эмбеддинг; обучение через triplet-loss вида `max(0, margin + cos(A, neg) − cos(A, pos))`.\n\n**Chunking (ядро задания).**\n- `fixed-size`: режем по N токенов (напр. 500) — рвётся предложение/мысль на стыке, контекст теряется.\n- `semantic/structural`: режем по блокам/разделам — каждый чанк = законченная мысль.\n- **Overlap**: `chunk_size=500, overlap=50` → окна `1–500 / 451–950 / 901–1400`. Без overlap — потеря контекста на стыках; с overlap — «граница на замке».\n\n**Tuning.** Чанки **500–1000** токенов; overlap **50–100**; вектора хранить в БД; **нормализация** (в лекции упрощённо «делить на макс»; для cosine корректнее **L2-норма** — в коде делаем L2).\n\n**Retrieval quality.** Bi-encoder (отдельные эмбеддинги, быстро, средняя точность) даёт top-20 быстро, но неточно → **reranking** cross-encoder'ом (query+doc вместе, медленно, точно) → top-5 → LLM. Пример: запрос «Как настроить CI/CD для Kotlin Multiplatform?» — «Настройка GitHub Actions для KMP» релевантна, «Обзор CI/CD инструментов 2023» похоже по вектору, но не отвечает на вопрос. **Реранкинг — отдельное задание недели, не день 21.**\n\n**Метрики.** *Context Relevance* (нашли ли правильные чанки; низкий → плохой retrieval); *Faithfulness* (ответ основан на контексте; низкий → галлюцинации); *Answer Correctness* (финальный ответ верен против эталона; низкий → всё плохо).\n\n**Limits of RAG.** Не поможет: нет данных (→ fine-tuning), нужна логика (→ prompt-eng / agents+tools), нужен стиль (→ fine-tuning), устаревший формат (→ multimodal RAG).\n\n**Why Ollama.** Безопасность (данные не покидают машину); нулевая цена (без API-ключа); совместимость (легко перейти на облачный эмбеддер); удобно тестировать (работает на малом — на большом будет лучше). Setup: `brew install --cask ollama` → `ollama serve \u0026` → `ollama pull nomic-embed-text` (768, gguf, family nomic-bert, ~137M). Пример лектора на **Kotlin** (`OllamaClient` на Ktor, `OllamaEmbeddingsRequest{model,prompt}` / `Response{embedding: List\u003cDouble\u003e}`) — мы портируем это на Go/`net/http`.\n\n---",
+      "tokens": 649
+    },
+    {
+      "chunk_id": "readme.md#005-21",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Что построили (день 21)",
+      "text": "## Что построили (день 21)\n\n`task-21/` — это **копия task-20** (накопительный агент с памятью/инвариантами/MCP-оркестрацией остаётся целым и собирается) **+ новый каталог `ragindex/`** — самостоятельный пайплайн индексации. Это соответствует и накопительной конвенции (`task-N = task-(N-1) + фича`), и заданию дня 21 (отдельный пайплайн индексации).\n\nПочему отдельный `package main`, а не в корне: в корне уже живёт агентский `main.go`/`pipeline.go`. По уроку дня 20 (коллизия `pipeline.go`) новый код кладём **в свой подкаталог** — как `notesserver/` и `weatherserver/`. Единый корневой `go.mod` на весь репозиторий сохраняется.\n\n---",
+      "tokens": 82
+    },
+    {
+      "chunk_id": "readme.md#006-x",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Архитектура",
+      "text": "## Архитектура\n\n```mermaid\nflowchart LR\n    C[\"Корпус\u003cbr/\u003e.go / .md / .txt\"] --\u003e F[\"chunkFixed\u003cbr/\u003e(окна N токенов + overlap)\"]\n    C --\u003e S[\"chunkStructural\u003cbr/\u003e(.md заголовки · .go AST · .txt абзацы)\"]\n    F --\u003e E[\"Embedder\u003cbr/\u003eOllama nomic-embed-text\u003cbr/\u003enet/http + L2-норма\"]\n    S --\u003e E\n    E --\u003e IF[\"index-fixed.json\"]\n    E --\u003e IS[\"index-structural.json\"]\n    F --\u003e CMP[\"compareReport\u003cbr/\u003ecomparison.md\"]\n    S --\u003e CMP\n    IS -. \"будущий день\" .-\u003e MCP[\"MCP-тул semantic_search\u003cbr/\u003eIndex.Search → top-k\"]\n```",
+      "tokens": 57
+    },
+    {
+      "chunk_id": "readme.md#007-ragindex",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "По файлам (`ragindex/`)",
+      "text": "### По файлам (`ragindex/`)\n\n| Файл | Что | Зачем |\n|---|---|---|\n| `corpus.go` | `loadCorpus` — рекурсивный обход каталога, фильтр по расширениям, skip служебных папок (`memory`, `notes`, `reports`, `ragindex`). `Doc{Path,Rel,Name,Ext,Text}`. | Один вход для обеих стратегий; `Rel`/`Name` → метаданные `source`/`file`. |\n| `chunk.go` | `Chunk` (метаданные + текст + вектор). `chunkFixed` (стратегия 1). `chunkStructural` (стратегия 2): `.md` → по заголовкам (`mdHeader`, учёт code-fence), `.go` → по верхнеуровневым декларациям через `go/parser` (`chunkGo` → package/import/type/func, методы как `Тип.Метод`), прочее → по абзацам. `approxTokens`, `slug`. | Ядро задания: две принципиально разные разбивки одного корпуса. |\n| `embed.go` | Интерфейс `Embedder`; `OllamaEmbedder` на `net/http` (`POST /api/embeddings`); `l2normalize`. | Эмбеддинги; провайдер за интерфейсом — свап на OpenAI/Voyage без правок пайплайна. |\n| `index.go` | `Index` (model/dim/strategy/params/chunks). `embedAll`, `Save`/`LoadIndex` (JSON, атомарно). `Search` (top-k косинус) + `Hit`, `dot`. | Сохранение индекса; `Search` — зерно будущего MCP-тула. |\n| `compare.go` | `Stats`, `computeStats`, `endsAtBoundary` (эвристика целостности границы), `compareReport`. | Сравнение двух стратегий (число чанков, размеры, доля целостных границ). |\n| `main.go` | CLI: флаги, сборка корпуса, обе стратегии, печать сравнения, эмбеддинги, сохранение индексов, опц. `-query`. | Точка входа и оркестрация. |\n\n---",
+      "tokens": 185
+    },
+    {
+      "chunk_id": "readme.md#008-chunking",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Две стратегии chunking",
+      "text": "## Две стратегии chunking\n\n**1. fixed-size + overlap** (`chunkFixed`). Каждый документ режется окнами по `chunk-size` токенов (≈слов) с шагом `chunk-size − overlap`. Структуру игнорирует. Дефолт `500/50` → окна `1–500 / 451–950 / 901–1400` (ровно как на слайде про overlap). Минус: рвёт мысль на стыке; плюс: предсказуемый размер.\n\n**2. structural** (`chunkStructural`) — диспетчеризация по типу файла, каждый чанк = законченная единица:\n- `.md` → по заголовкам `#…`; заголовок остаётся в своём чанке; `#` внутри ```` ``` ```` -fence не считается заголовком.\n- `.go` → через `go/parser`/`go/ast`: «шапка» (package + import) + по чанку на каждую `func`/`type`/`const`/`var`; doc-комментарий приклеивается к своей декларации; методы именуются `Тип.Метод`.\n- прочее (`.txt`, нераспарсенный `.go`) → по абзацам (пустая строка).",
+      "tokens": 113
+    },
+    {
+      "chunk_id": "readme.md#009-x",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Как читать сравнение",
+      "text": "### Как читать сравнение\n\n`comparison.md` (и stdout) дают таблицу: число чанков, средний/мин/макс размер в токенах, средний размер в символах и **долю целостных границ** — сколько чанков заканчивается на естественной границе (`. ! ? } : ;`). Эвристика грубая, но контраст показывает суть: у `fixed-size` доля низкая (режет на полуслове), у `structural` — высокая (режет по границам). Пример прогона на смешанном корпусе (статья + код): `fixed-size` 50% целостных границ против `structural` 89%.\n\n---",
+      "tokens": 72
+    },
+    {
+      "chunk_id": "readme.md#010-x",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Метаданные чанка (усиление)",
+      "text": "## Метаданные чанка (усиление)\n\nНа каждом чанке (JSON-индекс):\n\n```json\n{\n  \"chunk_id\": \"memory.go#013-func-Memory.Build\",\n  \"source\":   \"memory.go\",\n  \"file\":     \"memory.go\",\n  \"section\":  \"func Memory.Build\",\n  \"text\":     \"...\",\n  \"tokens\":   137,\n  \"vector\":   [0.013, -0.041, ...]\n}\n```\n\n- `source` — путь файла относительно корня корпуса;\n- `file` (title) — имя файла;\n- `section` — заголовок раздела (`.md`) / имя декларации (`.go`) / `part N` (fixed-size);\n- `chunk_id` — стабильный уникальный id (`\u003csource\u003e#\u003cпорядок\u003e-\u003cslug секции\u003e`).\n\n---",
+      "tokens": 66
+    },
+    {
+      "chunk_id": "readme.md#011-ollama",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Эмбеддинги (Ollama)",
+      "text": "## Эмбеддинги (Ollama)\n\n`OllamaEmbedder.Embed` шлёт `POST http://localhost:11434/api/embeddings` с телом `{\"model\":\"nomic-embed-text\",\"prompt\":\"...\"}`, читает `{\"embedding\":[...]}` (768 чисел) и **L2-нормирует** вектор (косинус сводится к скалярному произведению). Чистый `net/http`, без SDK.\n\nСвап на облако: добавить реализацию `Embedder` (напр. `OpenAIEmbedder` с `text-embedding-3-large`, dim 3072) — остальной пайплайн не меняется. PDF в корпусе: предварительно конвертировать в `.txt` (`pdftotext`) и положить рядом — пайплайн разберёт как абзацы.\n\n---",
+      "tokens": 60
+    },
+    {
+      "chunk_id": "readme.md#012-x",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Запуск",
+      "text": "## Запуск\n\n```bash\n# 0. собрать task-21 как копию task-20 + новый каталог ragindex/\ncp -r task-20 task-21\nmkdir -p task-21/ragindex\ncp \u003cэтот выпуск\u003e/ragindex/*.go task-21/ragindex/\n\n# 1. поднять Ollama и модель эмбеддингов\nbrew install --cask ollama      # если не стоит\nollama serve \u0026\nollama pull nomic-embed-text\n\n# 2. сухой прогон — только chunking + сравнение, без эмбеддингов (Ollama не нужна)\ncd task-21\ngo run ./ragindex -dry-run\n#   → печатает сравнение, пишет comparison.md + index-*.json (чанки с метаданными, без векторов)\n\n# 3. полная индексация (корпус по умолчанию = исходники агента task-21)\ngo run ./ragindex\n#   → index-fixed.json, index-structural.json (с векторами), comparison.md\n\n# 4. (опц.) проверить семантический поиск по обоим индексам\ngo run ./ragindex -query \"как агент проверяет инварианты перед вызовом тула\" -k 3\n\n# индексировать сторонний корпус (репозиторий/статьи):\ngo run ./ragindex -docs /path/to/repo -ext .go,.md,.txt -out ./ragindex\n```\n\nФлаги: `-docs` (корпус), `-ext` (расширения), `-out` (куда писать), `-ollama`/`-model`, `-chunk-size`/`-overlap`, `-query`/`-k`, `-dry-run`.",
+      "tokens": 149
+    },
+    {
+      "chunk_id": "readme.md#013-x",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Ожидаемый вывод (полный прогон, корпус = код агента)",
+      "text": "### Ожидаемый вывод (полный прогон, корпус = код агента)\n\n```\nКорпус: N файлов, ~M токенов (≈K стр. по 500 слов) из \u003cпуть\u003e\nЧанки: fixed-size=…, structural=…\n\nСравнение стратегий chunking\n============================\nМетрика                  | fixed-size           | structural\n----------------------------------------------------------------------\nЧанков                   | …                    | …\nТокенов — среднее        | ~500                 | плавает\nЦелостных границ         | ~50%                 | ~85–95%\n…\nЭмбеддинги (fixed-size):    эмбеддинг X/X\nЭмбеддинги (structural):    эмбеддинг Y/Y\nСохранено: index-fixed.json (… чанков, dim=768) · index-structural.json (… чанков, dim=768)\n```\n\n---",
+      "tokens": 74
+    },
+    {
+      "chunk_id": "readme.md#014-mcp",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Проектирование под будущий MCP-тул поиска",
+      "text": "## Проектирование под будущий MCP-тул поиска\n\n`Index.Search(ctx, embedder, query, k)` уже делает всё, что нужно семантическому поиску: эмбеддит запрос, считает косинус по L2-нормированным векторам, отдаёт top-k `Hit{Chunk, Score}`. В будущий день это оборачивается третьим MCP-сервером (рядом с `weatherserver`/`notesserver`): на старте `LoadIndex(\"index-structural.json\")`, тул `semantic_search{query, k}` → `idx.Search(...)` → текст чанков с `source`/`section`. Накопительный агент через свою MCP-оркестрацию (день 20) получит поиск по базе знаний. Это первый этап (bi-encoder); cross-encoder reranking — отдельный день.\n\n---",
+      "tokens": 73
+    },
+    {
+      "chunk_id": "readme.md#015-faq",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "FAQ (концептуальное)",
+      "text": "## FAQ (концептуальное)\n\n**Почему «токен ≈ слово»?** Точный счёт требует BPE-токенизатора модели. Для chunking и сравнения стратегий нужен стабильный воспроизводимый размерный сигнал — слова по пробелам его дают, без зависимостей. В конспекте и коде это отмечено как сознательное упрощение; при переходе на точные лимиты модели меняется только `approxTokens`.\n\n**Почему L2-норма, а не «делить на макс» из лекции?** Для косинусной близости корректна именно L2: после неё `cos(a,b) = a·b`, и поиск — одно скалярное произведение. «Делить на макс» — упрощение лектора; в коде делаем правильно, в конспекте отмечено честно.\n\n**Почему код режется через `go/parser`, а не регекспами?** AST даёт точные границы деклараций и корректно тащит doc-комментарии — это и есть «структура» для кода (аналог заголовков для markdown). Stdlib, без зависимостей. Если файл не парсится — деградируем до абзацев, чтобы не потерять документ.\n\n**Зачем overlap?** Без него мысль на стыке окон рвётся и теряется при поиске. Overlap 50–100 токенов «защищает границу»: соседние окна перекрываются, релевантный кусок целиком попадает хотя бы в один чанк. В `structural` overlap не нужен — там границы и так по смыслу.\n\n**Почему две стратегии дают так по-разному число чанков?** `fixed-size` нарезает по объёму (≈равные окна), `structural` — по смысловым единицам (заголовок/декларация), которых обычно больше и они мельче. Это и есть предмет сравнения: равномерность размера против целостности мысли.\n\n---",
+      "tokens": 210
+    },
+    {
+      "chunk_id": "readme.md#016-x",
+      "source": "readme.md",
+      "file": "readme.md",
+      "section": "Выводы",
+      "text": "## Выводы\n\n- Пайплайн индексации собран ровно по заданию: chunking → эмбеддинги → JSON-индекс с метаданными, + **усиление** (метаданные на чанк, **2 стратегии и сравнение**).\n- `structural` для кода реализован «по-честному» через AST, для markdown — по заголовкам с учётом code-fence; `fixed-size` — с overlap как в лекции.\n- Эмбеддер за интерфейсом (`net/http` к Ollama, L2-норма) — провайдер свапается без правок пайплайна.\n- Индекс и `Index.Search` подготовлены под будущий MCP-тул семантического поиска для накопительного агента; реранкинг — отдельный день.\n- Накопительный агент дня 20 не затронут: новый код изолирован в `ragindex/`, единый корневой `go.mod` сохранён.",
+      "tokens": 95
+    },
+    {
+      "chunk_id": "report.go#001-package-main",
+      "source": "report.go",
+      "file": "report.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "report.go#002-import",
+      "source": "report.go",
+      "file": "report.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"fmt\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n)",
+      "tokens": 6
+    },
+    {
+      "chunk_id": "report.go#003-func-runreport",
+      "source": "report.go",
+      "file": "report.go",
+      "section": "func runReport",
+      "text": "// runReport дня 15: (1) контроль переходов на «голой» механике (попытки недопустимых\n// переходов и реакция — без API); (2) реальный прогон задачи по этапам через LLM, где\n// видны запрос/ответ на каждом этапе и работают условия перехода; (3) опц. рой.\nfunc runReport(ctx context.Context, client anthropic.Client, profilesDir, memDir string, swarmOn bool, swarmStage string, maxTokens int64) error {\n\tmodel := anthropic.ModelClaudeOpus4_8\n\tstore := NewProfileStore(profilesDir)\n\n\tfmt.Println(\"=== День 15: контролируемые переходы состояний ===\")\n\tfmt.Println()\n\n\t// --- ЧАСТЬ 1. Контроль переходов (без API) ---\n\tfmt.Println(\"# Часть 1. Контроль переходов: допустимые состояния и попытки прыжков\")\n\tfor _, st := range []TaskState{StatePlanning, StateExecution, StateValidation, StateDone} {\n\t\tfmt.Printf(\"  %-11s → %s\\n\", st, joinStates(transitions[st]))\n\t}\n\tprobe := NewMemory(\"\")\n\tprobe.SetTask(\"парсер CSV на Go\", \"написать функцию чтения CSV\")\n\tfmt.Printf(\"Старт: state=%s, план утверждён=%v\\n\", probe.State(), probe.PlanApproved())\n\tif err := probe.Goto(StateValidation); err != nil {\n\t\tfmt.Printf(\"  /goto validation (прыжок через этап): ЗАПРЕЩЕНО — %s\\n\", err.Error())\n\t}\n\tif err := probe.Goto(StateExecution); err != nil {\n\t\tfmt.Printf(\"  /goto execution без плана: ЗАПРЕЩЕНО — %s\\n\", err.Error())\n\t}\n\tprobe.ApprovePlan()\n\tif err := probe.Goto(StateExecution); err == nil {\n\t\tfmt.Printf(\"  /approve-plan → /goto execution: РАЗРЕШЕНО (state=%s)\\n\", probe.State())\n\t}\n\t_, _ = probe.Advance()\n\tif err := probe.Goto(StateDone); err != nil {\n\t\tfmt.Printf(\"  /goto done без валидации (state=%s): ЗАПРЕЩЕНО — %s\\n\", probe.State(), err.Error())\n\t}\n\tfmt.Println()\n\n\t// --- ЧАСТЬ 2. Реальный прогон задачи по этапам через LLM ---\n\tfmt.Println(\"# Часть 2. Прогон задачи по этапам (живой диалог с LLM)\")\n\tmem := NewMemory(memDir)\n\tagent := NewAgent(client, model, mem)\n\tagent.SetMaxTokens(maxTokens)\n\tif p, err := store.Load(\"senior-go\"); err == nil {\n\t\tagent.SetProfile(p)\n\t}\n\tmem.SetTask(\"парсер CSV на Go\", \"написать функцию чтения CSV в структуры\")\n\tfmt.Printf(\"Задача: %s — %s\\n\", mem.TaskName(), mem.TaskGoal())\n\tfmt.Printf(\"Старт: state=%s\\n\", mem.State())\n\n\tpipe := NewPipeline(agent, false, nil)\n\tif swarmOn {\n\t\tpipe.EnableSwarm(NewSwarm(client, model, swarmStageOf(swarmStage)))\n\t\tfmt.Printf(\"(рой включён на этапе %s)\\n\", swarmStageOf(swarmStage))\n\t}\n\tdone, err := pipe.Run(ctx)\n\tif err != nil {\n\t\treturn err\n\t}\n\tfmt.Printf(\"\\nИтог прогона: state=%s, done=%v (условия перехода соблюдены автоматически)\\n\\n\", mem.State(), done)\n\n\t// --- Пауза/продолжение ---\n\tfmt.Println(\"# Пауза и продолжение\")\n\tfmt.Println(\"Состояние и флаги условий сохраняются в working.json; после паузы продолжаем\")\n\tfmt.Println(\"с того же этапа, переходы по-прежнему контролируются (прыжки/без условия запрещены).\")\n\tfmt.Println()\n\n\tfmt.Println(\"=== Что проверяет задание ===\")\n\tfmt.Println(\"• Допустимые состояния и разрешённые переходы заданы явно (в коде).\")\n\tfmt.Println(\"• Прыжок через этап и переход без выполненного условия — запрещены (Часть 1).\")\n\tfmt.Println(\"• Реакция на недопустимый переход — явный отказ с причиной.\")\n\tfmt.Println(\"• Условия: нельзя execution без утверждённого плана; нельзя done без валидации.\")\n\tfmt.Println(\"• Прогон по этапам идёт через LLM с видимыми запросами/ответами (Часть 2).\")\n\tif swarmOn {\n\t\tfmt.Printf(\"• Рой агентов на этапе %s + оркестратор сводит мнения в решение.\\n\", swarmStageOf(swarmStage))\n\t}\n\tfmt.Println(\"• После паузы продолжение корректно: состояние и контроль сохраняются.\")\n\treturn nil\n}",
+      "tokens": 425
+    },
+    {
+      "chunk_id": "state.go#001-package-main",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "state.go#002-import",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "import",
+      "text": "import (\n\t\"fmt\"\n\t\"strings\"\n)",
+      "tokens": 5
+    },
+    {
+      "chunk_id": "state.go#003-type-taskstate",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "type TaskState",
+      "text": "// TaskState — этап задачи (слайд 18). Детерминированный автомат:\n// planning → execution → validation → done.\ntype TaskState string",
+      "tokens": 20
+    },
+    {
+      "chunk_id": "state.go#004-const-stateplanning",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "const StatePlanning",
+      "text": "const (\n\tStatePlanning   TaskState = \"planning\"\n\tStateExecution  TaskState = \"execution\"\n\tStateValidation TaskState = \"validation\"\n\tStateDone       TaskState = \"done\"\n)",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "state.go#005-var-transitions",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "var transitions",
+      "text": "// transitions — разрешённые переходы (слайд 20). Прыгать через этап нельзя.\nvar transitions = map[TaskState][]TaskState{\n\tStatePlanning:   {StateExecution},\n\tStateExecution:  {StateValidation},\n\tStateValidation: {StateDone, StateExecution}, // не прошло — назад в execution\n\tStateDone:       {},\n}",
+      "tokens": 32
+    },
+    {
+      "chunk_id": "state.go#006-var-expectedaction",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "var expectedAction",
+      "text": "// expectedAction — что агент делает на этом этапе (поле «ожидаемое действие»).\nvar expectedAction = map[TaskState]string{\n\tStatePlanning:   \"собрать требования и предложить план; не писать финальный код\",\n\tStateExecution:  \"выполнять текущий шаг плана; не перепрыгивать шаги\",\n\tStateValidation: \"проверить результат на соответствие плану; найти расхождения\",\n\tStateDone:       \"задача завершена; зафиксировать результат\",\n}",
+      "tokens": 48
+    },
+    {
+      "chunk_id": "state.go#007-func-cantransition",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "func canTransition",
+      "text": "// canTransition сообщает, разрешён ли переход from→to.\nfunc canTransition(from, to TaskState) bool {\n\tfor _, t := range transitions[from] {\n\t\tif t == to {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}",
+      "tokens": 32
+    },
+    {
+      "chunk_id": "state.go#008-func-nextstate",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "func nextState",
+      "text": "// nextState — следующий этап по умолчанию (детерминированный путь вперёд).\nfunc nextState(s TaskState) (TaskState, bool) {\n\tswitch s {\n\tcase StatePlanning:\n\t\treturn StateExecution, true\n\tcase StateExecution:\n\t\treturn StateValidation, true\n\tcase StateValidation:\n\t\treturn StateDone, true\n\tdefault:\n\t\treturn s, false\n\t}\n}",
+      "tokens": 40
+    },
+    {
+      "chunk_id": "state.go#009-func-transition",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "func transition",
+      "text": "// transition выполняет переход с контролем в КОДЕ (require-стиль, слайд 20).\nfunc transition(from, to TaskState) error {\n\tif !canTransition(from, to) {\n\t\treturn fmt.Errorf(\"переход %s → %s запрещён (разрешено: %s)\",\n\t\t\tfrom, to, joinStates(transitions[from]))\n\t}\n\treturn nil\n}",
+      "tokens": 36
+    },
+    {
+      "chunk_id": "state.go#010-func-joinstates",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "func joinStates",
+      "text": "func joinStates(ss []TaskState) string {\n\tif len(ss) == 0 {\n\t\treturn \"нет (терминальное состояние)\"\n\t}\n\tparts := make([]string, len(ss))\n\tfor i, s := range ss {\n\t\tparts[i] = string(s)\n\t}\n\treturn strings.Join(parts, \", \")\n}",
+      "tokens": 35
+    },
+    {
+      "chunk_id": "state.go#011-func-taskstate-valid",
+      "source": "state.go",
+      "file": "state.go",
+      "section": "func TaskState.valid",
+      "text": "func (s TaskState) valid() bool {\n\tswitch s {\n\tcase StatePlanning, StateExecution, StateValidation, StateDone:\n\t\treturn true\n\t}\n\treturn false\n}",
+      "tokens": 20
+    },
+    {
+      "chunk_id": "swarm.go#001-package-main",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "swarm.go#002-import",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"fmt\"\n\t\"strings\"\n\n\t\"github.com/anthropics/anthropic-sdk-go\"\n)",
+      "tokens": 7
+    },
+    {
+      "chunk_id": "swarm.go#003-type-reviewer",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "type Reviewer",
+      "text": "// Reviewer — один проверяющий агент роя (своя «роль»/угол зрения и system prompt).\ntype Reviewer struct {\n\tName   string\n\tSystem string\n}",
+      "tokens": 22
+    },
+    {
+      "chunk_id": "swarm.go#004-func-validationreviewers",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func validationReviewers",
+      "text": "// validationReviewers — рой проверяющих для этапа validation: смотрят с разных сторон.\nfunc validationReviewers() []Reviewer {\n\treturn []Reviewer{\n\t\t{Name: \"корректность\", System: \"Ты ревьюер-критик. Проверь РЕЗУЛЬТАТ на соответствие ПЛАНУ: что не сделано, что расходится. Кратко, по пунктам.\"},\n\t\t{Name: \"инварианты\", System: \"Ты ревьюер по ограничениям. Проверь, не нарушает ли результат инварианты (стек, отсутствие тяжёлых зависимостей, секреты). Кратко.\"},\n\t\t{Name: \"качество\", System: \"Ты ревьюер по качеству Go. Оцени идиоматичность, обработку ошибок, тестируемость. Кратко, без переписывания.\"},\n\t}\n}",
+      "tokens": 73
+    },
+    {
+      "chunk_id": "swarm.go#005-func-planningreviewers",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func planningReviewers",
+      "text": "// planningReviewers — рой на этапе planning/research: смотрят план с разных сторон\n// (пример лектора «этап исследования 5 агентами с разных сторон»).\nfunc planningReviewers() []Reviewer {\n\treturn []Reviewer{\n\t\t{Name: \"архитектура\", System: \"Ты архитектор. Оцени ПЛАН с точки зрения структуры и границ модулей. Что упущено? Кратко.\"},\n\t\t{Name: \"риски\", System: \"Ты ревьюер рисков. Найди в ПЛАНЕ слабые места, неучтённые edge-cases, переусложнение. Кратко.\"},\n\t\t{Name: \"стек/инварианты\", System: \"Ты ревьюер ограничений. Проверь, согласуется ли ПЛАН со стеком и инвариантами (только Go, без тяжёлых зависимостей). Кратко.\"},\n\t}\n}",
+      "tokens": 82
+    },
+    {
+      "chunk_id": "swarm.go#006-type-reviewresult",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "type ReviewResult",
+      "text": "// ReviewResult — мнение одного ревьюера.\ntype ReviewResult struct {\n\tName    string\n\tVerdict string // OK | ISSUES\n\tNotes   string\n}",
+      "tokens": 21
+    },
+    {
+      "chunk_id": "swarm.go#007-type-swarm",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "type Swarm",
+      "text": "// Swarm — рой ревьюеров + оркестратор, сводящий мнения в одно решение.\ntype Swarm struct {\n\tclient    anthropic.Client\n\tmodel     anthropic.Model\n\tstage     TaskState\n\treviewers []Reviewer\n}",
+      "tokens": 25
+    },
+    {
+      "chunk_id": "swarm.go#008-func-newswarm",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func NewSwarm",
+      "text": "// NewSwarm создаёт рой для конкретного этапа (planning или validation).\nfunc NewSwarm(client anthropic.Client, model anthropic.Model, stage TaskState) *Swarm {\n\trv := validationReviewers()\n\tif stage == StatePlanning {\n\t\trv = planningReviewers()\n\t}\n\treturn \u0026Swarm{client: client, model: model, stage: stage, reviewers: rv}\n}",
+      "tokens": 41
+    },
+    {
+      "chunk_id": "swarm.go#009-func-swarm-stage",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func Swarm.Stage",
+      "text": "func (s *Swarm) Stage() TaskState { return s.stage }",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "swarm.go#010-func-swarm-review",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func Swarm.Review",
+      "text": "// Review запускает каждого ревьюера по (план, результат) — отдельный агент-инстанс.\nfunc (s *Swarm) Review(ctx context.Context, plan, result string) ([]ReviewResult, error) {\n\tvar out []ReviewResult\n\tfor _, r := range s.reviewers {\n\t\tvar user string\n\t\tif s.stage == StatePlanning {\n\t\t\tuser = \"[ПЛАН]\\n\" + plan +\n\t\t\t\t\"\\n\\nОтветь строго:\\nVERDICT: OK|ISSUES\\nNOTES: \u003c1–2 предложения\u003e\"\n\t\t} else {\n\t\t\tuser = \"[ПЛАН]\\n\" + plan + \"\\n\\n[РЕЗУЛЬТАТ]\\n\" + result +\n\t\t\t\t\"\\n\\nОтветь строго:\\nVERDICT: OK|ISSUES\\nNOTES: \u003c1–2 предложения\u003e\"\n\t\t}\n\t\tmsg, err := s.client.Messages.New(ctx, anthropic.MessageNewParams{\n\t\t\tModel: s.model, MaxTokens: 250,\n\t\t\tSystem:   []anthropic.TextBlockParam{{Text: r.System}},\n\t\t\tMessages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},\n\t\t})\n\t\tif err != nil {\n\t\t\treturn nil, fmt.Errorf(\"reviewer %s: %w\", r.Name, err)\n\t\t}\n\t\tv, n := parseReview(collectText(msg))\n\t\tout = append(out, ReviewResult{Name: r.Name, Verdict: v, Notes: n})\n\t}\n\treturn out, nil\n}",
+      "tokens": 116
+    },
+    {
+      "chunk_id": "swarm.go#011-func-swarm-orchestrate",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func Swarm.Orchestrate",
+      "text": "// Orchestrate сводит мнения ревьюеров: если хоть один ISSUES — задача не проходит,\n// оркестратор знает исходный запрос и принимает сводное решение.\nfunc (s *Swarm) Orchestrate(ctx context.Context, userQuery string, reviews []ReviewResult) (passed bool, summary string, err error) {\n\tvar b strings.Builder\n\tissues := 0\n\tfor _, r := range reviews {\n\t\tfmt.Fprintf(\u0026b, \"- [%s] %s: %s\\n\", r.Name, r.Verdict, r.Notes)\n\t\tif strings.ToUpper(r.Verdict) == \"ISSUES\" {\n\t\t\tissues++\n\t\t}\n\t}\n\tsys := \"Ты агент-оркестратор. Знаешь запрос пользователя и мнения ревьюеров. \" +\n\t\t\"Прими сводное решение: если есть существенные замечания — PASS: NO. \" +\n\t\t\"Ответь строго:\\nPASS: YES|NO\\nSUMMARY: \u003c1–2 предложения сводного решения\u003e\"\n\tuser := \"[ЗАПРОС ПОЛЬЗОВАТЕЛЯ]\\n\" + userQuery + \"\\n\\n[МНЕНИЯ РЕВЬЮЕРОВ]\\n\" + b.String()\n\tmsg, err := s.client.Messages.New(ctx, anthropic.MessageNewParams{\n\t\tModel: s.model, MaxTokens: 250,\n\t\tSystem:   []anthropic.TextBlockParam{{Text: sys}},\n\t\tMessages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},\n\t})\n\tif err != nil {\n\t\treturn false, \"\", fmt.Errorf(\"orchestrator: %w\", err)\n\t}\n\tpass, sum := parsePass(collectText(msg))\n\t// оркестратор имеет финальное слово, но подстрахуемся: при ISSUES без явного YES — NO\n\tif issues \u003e 0 \u0026\u0026 pass {\n\t\t// доверяем оркестратору, он видит запрос; оставляем его решение\n\t}\n\treturn pass, sum, nil\n}",
+      "tokens": 176
+    },
+    {
+      "chunk_id": "swarm.go#012-func-parsereview",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func parseReview",
+      "text": "func parseReview(s string) (verdict, notes string) {\n\tverdict = \"OK\"\n\tfor _, line := range strings.Split(s, \"\\n\") {\n\t\tl := strings.TrimSpace(line)\n\t\tup := strings.ToUpper(l)\n\t\tif strings.HasPrefix(up, \"VERDICT:\") {\n\t\t\tif strings.Contains(up, \"ISSUES\") {\n\t\t\t\tverdict = \"ISSUES\"\n\t\t\t} else {\n\t\t\t\tverdict = \"OK\"\n\t\t\t}\n\t\t}\n\t\tif strings.HasPrefix(up, \"NOTES:\") {\n\t\t\tnotes = strings.TrimSpace(l[len(\"NOTES:\"):])\n\t\t}\n\t}\n\treturn verdict, notes\n}",
+      "tokens": 56
+    },
+    {
+      "chunk_id": "swarm.go#013-func-parsepass",
+      "source": "swarm.go",
+      "file": "swarm.go",
+      "section": "func parsePass",
+      "text": "func parsePass(s string) (pass bool, summary string) {\n\tfor _, line := range strings.Split(s, \"\\n\") {\n\t\tl := strings.TrimSpace(line)\n\t\tup := strings.ToUpper(l)\n\t\tif strings.HasPrefix(up, \"PASS:\") {\n\t\t\tpass = strings.Contains(up, \"YES\")\n\t\t}\n\t\tif strings.HasPrefix(up, \"SUMMARY:\") {\n\t\t\tsummary = strings.TrimSpace(l[len(\"SUMMARY:\"):])\n\t\t}\n\t}\n\treturn pass, summary\n}",
+      "tokens": 44
+    },
+    {
+      "chunk_id": "usage.go#001-package-main",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "usage.go#002-import",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "import",
+      "text": "import \"github.com/anthropics/anthropic-sdk-go\"",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "usage.go#003-const-opusinperm",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "const opusInPerM",
+      "text": "const (\n\topusInPerM   = 5.0\n\topusOutPerM  = 25.0\n\thaikuInPerM  = 1.0\n\thaikuOutPerM = 5.0\n)",
+      "tokens": 15
+    },
+    {
+      "chunk_id": "usage.go#004-func-pricefor",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "func priceFor",
+      "text": "func priceFor(model anthropic.Model) (inPerM, outPerM float64) {\n\tif containsFold(string(model), \"haiku\") {\n\t\treturn haikuInPerM, haikuOutPerM\n\t}\n\treturn opusInPerM, opusOutPerM\n}",
+      "tokens": 19
+    },
+    {
+      "chunk_id": "usage.go#005-func-costfor",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "func costFor",
+      "text": "func costFor(model anthropic.Model, input, output int64) float64 {\n\tin, out := priceFor(model)\n\treturn float64(input)/1e6*in + float64(output)/1e6*out\n}",
+      "tokens": 17
+    },
+    {
+      "chunk_id": "usage.go#006-func-containsfold",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "func containsFold",
+      "text": "func containsFold(s, sub string) bool {\n\tfor i := 0; i+len(sub) \u003c= len(s); i++ {\n\t\tif equalFold(s[i:i+len(sub)], sub) {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}",
+      "tokens": 26
+    },
+    {
+      "chunk_id": "usage.go#007-func-equalfold",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "func equalFold",
+      "text": "func equalFold(a, b string) bool {\n\tif len(a) != len(b) {\n\t\treturn false\n\t}\n\tfor i := range a {\n\t\tca, cb := a[i], b[i]\n\t\tif 'A' \u003c= ca \u0026\u0026 ca \u003c= 'Z' {\n\t\t\tca += 'a' - 'A'\n\t\t}\n\t\tif 'A' \u003c= cb \u0026\u0026 cb \u003c= 'Z' {\n\t\t\tcb += 'a' - 'A'\n\t\t}\n\t\tif ca != cb {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}",
+      "tokens": 67
+    },
+    {
+      "chunk_id": "usage.go#008-const-roleuser",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "const roleUser",
+      "text": "const (\n\troleUser      = \"user\"\n\troleAssistant = \"assistant\"\n)",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "usage.go#009-type-storedmessage",
+      "source": "usage.go",
+      "file": "usage.go",
+      "section": "type storedMessage",
+      "text": "type storedMessage struct {\n\tRole    string `json:\"role\"`\n\tContent string `json:\"content\"`\n}",
+      "tokens": 11
+    },
+    {
+      "chunk_id": "watch.go#001-package-main",
+      "source": "watch.go",
+      "file": "watch.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "watch.go#002-import",
+      "source": "watch.go",
+      "file": "watch.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"strings\"\n\t\"time\"\n)",
+      "tokens": 8
+    },
+    {
+      "chunk_id": "watch.go#003-func-runwatch",
+      "source": "watch.go",
+      "file": "watch.go",
+      "section": "func runWatch",
+      "text": "// runWatch — день 18: «агент 24/7». Ставит города на фоновый сбор (track_location),\n// затем по своему тикеру периодически дёргает weather_summary и печатает агрегат.\n// Это планировщик на стороне агента; MCP-сервер пассивен (как в каноне из чата).\n// Прямые вызовы тулов — без траты токенов LLM.\nfunc runWatch(ctx context.Context, m *MCPTools, watchSec int, locations []string, intervalSec int) {\n\t// 1) поставить города на фоновый сбор\n\tfor _, loc := range locations {\n\t\tloc = strings.TrimSpace(loc)\n\t\tif loc == \"\" {\n\t\t\tcontinue\n\t\t}\n\t\tout, _ := m.Call(ctx, \"track_location\", jsonArgs(map[string]any{\n\t\t\t\"location\": loc, \"interval_sec\": intervalSec,\n\t\t}))\n\t\tfmt.Printf(\"[watch] %s\\n\", out)\n\t}\n\n\t// 2) 24/7-цикл: периодическая сводка\n\tfmt.Printf(\"[watch] агент работает 24/7: сводка каждые %d с (Ctrl-C — выход)\\n\", watchSec)\n\tticker := time.NewTicker(time.Duration(watchSec) * time.Second)\n\tdefer ticker.Stop()\n\tfor {\n\t\tselect {\n\t\tcase \u003c-ctx.Done():\n\t\t\tfmt.Println(\"\\n[watch] остановлено, память сохранена\")\n\t\t\treturn\n\t\tcase \u003c-ticker.C:\n\t\t\tout, _ := m.Call(ctx, \"weather_summary\", json.RawMessage(`{}`))\n\t\t\tfmt.Printf(\"\\n[сводка %s]\\n%s\\n\", time.Now().Format(\"15:04:05\"), out)\n\t\t}\n\t}\n}",
+      "tokens": 147
+    },
+    {
+      "chunk_id": "watch.go#004-func-jsonargs",
+      "source": "watch.go",
+      "file": "watch.go",
+      "section": "func jsonArgs",
+      "text": "// jsonArgs — компактная сборка JSON-аргументов для вызова MCP-тула.\nfunc jsonArgs(m map[string]any) json.RawMessage {\n\tb, err := json.Marshal(m)\n\tif err != nil {\n\t\treturn json.RawMessage(`{}`)\n\t}\n\treturn json.RawMessage(b)\n}",
+      "tokens": 29
+    },
+    {
+      "chunk_id": "weatherserver/composition.go#001-package-main",
+      "source": "weatherserver/composition.go",
+      "file": "composition.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "weatherserver/composition.go#002-import",
+      "source": "weatherserver/composition.go",
+      "file": "composition.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"sort\"\n\t\"strings\"\n\n\t\"github.com/modelcontextprotocol/go-sdk/mcp\"\n)",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "weatherserver/composition.go#003-type-cityweather",
+      "source": "weatherserver/composition.go",
+      "file": "composition.go",
+      "section": "type cityWeather",
+      "text": "// cityWeather — единая схема данных, которую отдаёт collect и принимает report.\n// Общий тип гарантирует корректность передачи данных между тулами.\ntype cityWeather struct {\n\tName    string  `json:\"name\"`\n\tCountry string  `json:\"country\"`\n\tTemp    float64 `json:\"temp\"`\n\tWind    float64 `json:\"wind\"`\n\tCode    int     `json:\"code\"`\n\tDesc    string  `json:\"desc\"`\n}",
+      "tokens": 44
+    },
+    {
+      "chunk_id": "weatherserver/composition.go#004-func-registerpipelinetools",
+      "source": "weatherserver/composition.go",
+      "file": "composition.go",
+      "section": "func registerPipelineTools",
+      "text": "func registerPipelineTools(s *mcp.Server) {\n\t// 1) ПОИСК/ПОЛУЧЕНИЕ: собрать текущую погоду по списку городов → {cities:[...]}.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName: \"weather_collect\",\n\t\tDescription: \"Шаг 1 пайплайна. Собирает текущую погоду по списку городов и возвращает \" +\n\t\t\t\"JSON {\\\"cities\\\":[...]}. Этот результат передаётся в make_report.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\n\t\t\t\t\"locations\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Города, напр. [\\\"Берлин\\\",\\\"София\\\"]\"},\n\t\t\t\t\"units\":{\"type\":\"string\",\"enum\":[\"celsius\",\"fahrenheit\"],\"default\":\"celsius\"}\n\t\t\t},\n\t\t\t\"required\":[\"locations\"]\n\t\t}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tLocations []string `json:\"locations\"`\n\t\t\tUnits     string   `json:\"units\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tif in.Units == \"\" {\n\t\t\tin.Units = \"celsius\"\n\t\t}\n\t\tcities := make([]cityWeather, 0, len(in.Locations))\n\t\tfor _, loc := range in.Locations {\n\t\t\tplaces, err := geocode(ctx, loc, 1)\n\t\t\tif err != nil || len(places) == 0 {\n\t\t\t\tcontinue // пропускаем ненайденные, не роняя весь пайплайн\n\t\t\t}\n\t\t\tp := places[0]\n\t\t\tw, err := currentWeather(ctx, p.Lat, p.Lon, in.Units)\n\t\t\tif err != nil {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tcities = append(cities, cityWeather{\n\t\t\t\tName: p.Name, Country: p.Country,\n\t\t\t\tTemp: w.Temp, Wind: w.Wind, Code: w.Code, Desc: weatherCodeText(w.Code),\n\t\t\t})\n\t\t}\n\t\tout, _ := json.Marshal(struct {\n\t\t\tCities []cityWeather `json:\"cities\"`\n\t\t}{cities})\n\t\treturn textResult(string(out)), nil\n\t})\n\n\t// 2) ОБРАБОТКА: из собранных данных сделать текстовый отчёт (итог). Без LLM.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName: \"make_report\",\n\t\tDescription: \"Шаг 2 пайплайна. Принимает cities (из weather_collect) и формирует \" +\n\t\t\t\"текстовый отчёт: рейтинг по температуре, экстремумы, среднее. Результат можно сохранить тулом save_to_file (сервер notes).\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\n\t\t\t\t\"cities\":{\"type\":\"array\",\"description\":\"Массив из weather_collect (поле cities)\",\n\t\t\t\t\t\"items\":{\"type\":\"object\",\"properties\":{\n\t\t\t\t\t\t\"name\":{\"type\":\"string\"},\"country\":{\"type\":\"string\"},\n\t\t\t\t\t\t\"temp\":{\"type\":\"number\"},\"wind\":{\"type\":\"number\"},\n\t\t\t\t\t\t\"code\":{\"type\":\"integer\"},\"desc\":{\"type\":\"string\"}}}},\n\t\t\t\t\"title\":{\"type\":\"string\",\"description\":\"Заголовок отчёта (необязательно)\"}\n\t\t\t},\n\t\t\t\"required\":[\"cities\"]\n\t\t}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tCities []cityWeather `json:\"cities\"`\n\t\t\tTitle  string        `json:\"title\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tif len(in.Cities) == 0 {\n\t\t\treturn textResult(\"нет данных для отчёта\"), nil\n\t\t}\n\t\treturn textResult(buildReport(in.Cities, in.Title)), nil\n\t})\n\n}",
+      "tokens": 285
+    },
+    {
+      "chunk_id": "weatherserver/composition.go#005-func-buildreport",
+      "source": "weatherserver/composition.go",
+      "file": "composition.go",
+      "section": "func buildReport",
+      "text": "func buildReport(cities []cityWeather, title string) string {\n\tsorted := make([]cityWeather, len(cities))\n\tcopy(sorted, cities)\n\tsort.Slice(sorted, func(i, j int) bool { return sorted[i].Temp \u003e sorted[j].Temp })\n\n\tvar b strings.Builder\n\tif title == \"\" {\n\t\ttitle = \"Погодный отчёт\"\n\t}\n\tfmt.Fprintf(\u0026b, \"%s\\n%s\\n\\n\", title, strings.Repeat(\"=\", len([]rune(title))))\n\tfmt.Fprintf(\u0026b, \"Городов: %d\\n\\n\", len(sorted))\n\n\tsum := 0.0\n\tfor i, c := range sorted {\n\t\tfmt.Fprintf(\u0026b, \"%d. %s, %s — %.1f°C, ветер %.0f км/ч, %s\\n\",\n\t\t\ti+1, c.Name, c.Country, c.Temp, c.Wind, c.Desc)\n\t\tsum += c.Temp\n\t}\n\twarm, cold := sorted[0], sorted[len(sorted)-1]\n\tfmt.Fprintf(\u0026b, \"\\nТеплее всего: %s (%.1f°C) · холоднее всего: %s (%.1f°C) · средняя %.1f°C\\n\",\n\t\twarm.Name, warm.Temp, cold.Name, cold.Temp, sum/float64(len(sorted)))\n\treturn b.String()\n}",
+      "tokens": 102
+    },
+    {
+      "chunk_id": "weatherserver/main.go#001-package-main",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "weatherserver/main.go#002-import",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"io\"\n\t\"log\"\n\t\"net/http\"\n\t\"net/url\"\n\t\"path/filepath\"\n\t\"runtime\"\n\t\"strconv\"\n\t\"strings\"\n\t\"time\"\n\n\t\"github.com/modelcontextprotocol/go-sdk/mcp\"\n)",
+      "tokens": 16
+    },
+    {
+      "chunk_id": "weatherserver/main.go#003-func-sourcedir",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func sourceDir",
+      "text": "// sourceDir — каталог этого файла (рядом кладём weather-store.json).\nfunc sourceDir() string {\n\tif _, file, _, ok := runtime.Caller(0); ok {\n\t\treturn filepath.Dir(file)\n\t}\n\treturn \".\"\n}",
+      "tokens": 28
+    },
+    {
+      "chunk_id": "weatherserver/main.go#004-const-useragent",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "const userAgent",
+      "text": "const userAgent = \"mcp-weather/0.1 (ai-challenge day17)\"",
+      "tokens": 6
+    },
+    {
+      "chunk_id": "weatherserver/main.go#005-func-main",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func main",
+      "text": "func main() {\n\t// День 18: персистентное хранилище рядом с сервером + контекст для фоновых сборщиков.\n\tstore := loadStore(filepath.Join(sourceDir(), \"weather-store.json\"))\n\tctx, cancel := context.WithCancel(context.Background())\n\tdefer cancel()\n\n\t// Возобновляем периодический сбор по уже отслеживаемым городам (после рестарта).\n\tsched := NewScheduler(ctx, store)\n\tfor _, t := range store.List() {\n\t\tsched.Start(t)\n\t\tlog.Printf(\"[collector] возобновлён сбор: %s каждые %d с\", t.Name, t.IntervalSec)\n\t}\n\n\ts := mcp.NewServer(\u0026mcp.Implementation{Name: \"weather-mcp\", Version: \"0.2.0\"}, nil)\n\n\t// --- Инструмент 1: geocode (название -\u003e координаты) ---\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"geocode\",\n\t\tDescription: \"Найти координаты населённого пункта по названию (open-meteo geocoding).\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\n\t\t\t\t\"name\":{\"type\":\"string\",\"description\":\"Название города, напр. 'Берлин' или 'Sofia'\"},\n\t\t\t\t\"count\":{\"type\":\"integer\",\"description\":\"Сколько результатов вернуть (1-10)\",\"default\":1}\n\t\t\t},\n\t\t\t\"required\":[\"name\"]\n\t\t}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tName  string `json:\"name\"`\n\t\t\tCount int    `json:\"count\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errResult(fmt.Errorf(\"не разобрал аргументы: %w\", err)), nil\n\t\t}\n\t\tif in.Count \u003c= 0 {\n\t\t\tin.Count = 1\n\t\t}\n\t\tplaces, err := geocode(ctx, in.Name, in.Count)\n\t\tif err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tif len(places) == 0 {\n\t\t\treturn textResult(\"ничего не найдено по запросу: \" + in.Name), nil\n\t\t}\n\t\tvar b strings.Builder\n\t\tfor _, p := range places {\n\t\t\tfmt.Fprintf(\u0026b, \"%s, %s — lat=%.4f lon=%.4f\\n\", p.Name, p.Country, p.Lat, p.Lon)\n\t\t}\n\t\treturn textResult(strings.TrimRight(b.String(), \"\\n\")), nil\n\t})\n\n\t// --- Инструмент 2: weather_current (город -\u003e текущая погода) ---\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"weather_current\",\n\t\tDescription: \"Текущая погода в городе: геокодит название и берёт текущие показатели open-meteo.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\n\t\t\t\t\"location\":{\"type\":\"string\",\"description\":\"Город, напр. 'Берлин' или 'Sofia'\"},\n\t\t\t\t\"units\":{\"type\":\"string\",\"enum\":[\"celsius\",\"fahrenheit\"],\"description\":\"Единицы температуры\",\"default\":\"celsius\"}\n\t\t\t},\n\t\t\t\"required\":[\"location\"]\n\t\t}`),\n\t}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tLocation string `json:\"location\"`\n\t\t\tUnits    string `json:\"units\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errResult(fmt.Errorf(\"не разобрал аргументы: %w\", err)), nil\n\t\t}\n\t\tif in.Units == \"\" {\n\t\t\tin.Units = \"celsius\"\n\t\t}\n\t\tplaces, err := geocode(ctx, in.Location, 1)\n\t\tif err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tif len(places) == 0 {\n\t\t\treturn textResult(\"город не найден: \" + in.Location), nil\n\t\t}\n\t\tp := places[0]\n\t\tw, err := currentWeather(ctx, p.Lat, p.Lon, in.Units)\n\t\tif err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tdeg := \"°C\"\n\t\tif in.Units == \"fahrenheit\" {\n\t\t\tdeg = \"°F\"\n\t\t}\n\t\tout := fmt.Sprintf(\"%s, %s: %.1f%s, ветер %.0f км/ч, %s\",\n\t\t\tp.Name, p.Country, w.Temp, deg, w.Wind, weatherCodeText(w.Code))\n\t\treturn textResult(out), nil\n\t})\n\n\t// День 18: тулы планировщика/фоновых задач.\n\tregisterScheduledTools(sched, s, store)\n\n\t// День 19: пайплайн-тулы (collect → report → save).\n\tregisterPipelineTools(s)\n\n\t// Run обслуживает stdio до закрытия соединения клиентом.\n\tif err := s.Run(ctx, \u0026mcp.StdioTransport{}); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}",
+      "tokens": 407
+    },
+    {
+      "chunk_id": "weatherserver/main.go#006-func-registerscheduledtools",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func registerScheduledTools",
+      "text": "// registerScheduledTools регистрирует тулы дня 18 на сервере.\nfunc registerScheduledTools(sched *Scheduler, s *mcp.Server, store *Store) {\n\t// track_location — отложенно/периодически собирать погоду по городу.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"track_location\",\n\t\tDescription: \"Начать периодический фоновый сбор погоды по городу (сохраняется в JSON). Возвращает подтверждение.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\n\t\t\t\t\"location\":{\"type\":\"string\",\"description\":\"Город, напр. 'Берлин'\"},\n\t\t\t\t\"interval_sec\":{\"type\":\"integer\",\"description\":\"Период сбора в секундах (мин. 5)\",\"default\":60}\n\t\t\t},\n\t\t\t\"required\":[\"location\"]\n\t\t}`),\n\t}, func(ctx2 context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tLocation    string `json:\"location\"`\n\t\t\tIntervalSec int    `json:\"interval_sec\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tif in.IntervalSec \u003c 5 {\n\t\t\tin.IntervalSec = 60\n\t\t}\n\t\tplaces, err := geocode(ctx2, in.Location, 1)\n\t\tif err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tif len(places) == 0 {\n\t\t\treturn textResult(\"город не найден: \" + in.Location), nil\n\t\t}\n\t\tp := places[0]\n\t\tt := \u0026Tracked{\n\t\t\tLocation: in.Location, Name: p.Name, Country: p.Country,\n\t\t\tLat: p.Lat, Lon: p.Lon, IntervalSec: in.IntervalSec,\n\t\t}\n\t\tstore.Upsert(t)\n\t\tsched.Start(t) // живёт после ответа, пока жив сервер\n\t\treturn textResult(fmt.Sprintf(\"слежу за %s, %s — сбор каждые %d с (данные в weather-store.json)\",\n\t\t\tp.Name, p.Country, in.IntervalSec)), nil\n\t})\n\n\t// weather_summary — агрегированный результат по накопленным наблюдениям.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"weather_summary\",\n\t\tDescription: \"Агрегированная сводка по собранным наблюдениям (кол-во, период, min/avg/max температуры). Без location — по всем городам.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\n\t\t\t\t\"location\":{\"type\":\"string\",\"description\":\"Город; пусто = по всем отслеживаемым\"}\n\t\t\t}\n\t\t}`),\n\t}, func(ctx2 context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tLocation string `json:\"location\"`\n\t\t}\n\t\t_ = json.Unmarshal(req.Params.Arguments, \u0026in)\n\t\treturn textResult(store.Summary(in.Location)), nil\n\t})\n\n\t// list_tracked — что сейчас отслеживается.\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"list_tracked\",\n\t\tDescription: \"Список городов, по которым идёт фоновый сбор, и их интервалы.\",\n\t\tInputSchema: json.RawMessage(`{\"type\":\"object\"}`),\n\t}, func(ctx2 context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tts := store.List()\n\t\tif len(ts) == 0 {\n\t\t\treturn textResult(\"ничего не отслеживается\"), nil\n\t\t}\n\t\tvar b strings.Builder\n\t\tfor _, t := range ts {\n\t\t\tfmt.Fprintf(\u0026b, \"%s, %s — каждые %d с, наблюдений: %d\\n\", t.Name, t.Country, t.IntervalSec, len(t.Samples))\n\t\t}\n\t\treturn textResult(strings.TrimRight(b.String(), \"\\n\")), nil\n\t})\n\n\t// untrack_location — снять город с фонового сбора (останавливает горутину).\n\ts.AddTool(\u0026mcp.Tool{\n\t\tName:        \"untrack_location\",\n\t\tDescription: \"Прекратить фоновый сбор по городу. Можно указать название как при добавлении.\",\n\t\tInputSchema: json.RawMessage(`{\n\t\t\t\"type\":\"object\",\n\t\t\t\"properties\":{\"location\":{\"type\":\"string\",\"description\":\"Город, который перестать отслеживать\"}},\n\t\t\t\"required\":[\"location\"]\n\t\t}`),\n\t}, func(ctx2 context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {\n\t\tvar in struct {\n\t\t\tLocation string `json:\"location\"`\n\t\t}\n\t\tif err := json.Unmarshal(req.Params.Arguments, \u0026in); err != nil {\n\t\t\treturn errResult(err), nil\n\t\t}\n\t\tkey, name, ok := store.Remove(in.Location)\n\t\tif !ok {\n\t\t\treturn textResult(\"не отслеживается: \" + in.Location), nil\n\t\t}\n\t\tsched.Stop(key)\n\t\treturn textResult(\"снят с отслеживания: \" + name), nil\n\t})\n}",
+      "tokens": 398
+    },
+    {
+      "chunk_id": "weatherserver/main.go#007-type-place",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "type place",
+      "text": "type place struct {\n\tName    string\n\tCountry string\n\tLat     float64\n\tLon     float64\n}",
+      "tokens": 13
+    },
+    {
+      "chunk_id": "weatherserver/main.go#008-func-geocode",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func geocode",
+      "text": "func geocode(ctx context.Context, name string, count int) ([]place, error) {\n\tq := url.Values{}\n\tq.Set(\"name\", name)\n\tq.Set(\"count\", strconv.Itoa(count))\n\tq.Set(\"language\", \"ru\")\n\tq.Set(\"format\", \"json\")\n\tu := \"https://geocoding-api.open-meteo.com/v1/search?\" + q.Encode()\n\n\tvar resp struct {\n\t\tResults []struct {\n\t\t\tName      string  `json:\"name\"`\n\t\t\tCountry   string  `json:\"country\"`\n\t\t\tLatitude  float64 `json:\"latitude\"`\n\t\t\tLongitude float64 `json:\"longitude\"`\n\t\t} `json:\"results\"`\n\t}\n\tif err := getJSON(ctx, u, \u0026resp); err != nil {\n\t\treturn nil, err\n\t}\n\tout := make([]place, 0, len(resp.Results))\n\tfor _, r := range resp.Results {\n\t\tout = append(out, place{Name: r.Name, Country: r.Country, Lat: r.Latitude, Lon: r.Longitude})\n\t}\n\treturn out, nil\n}",
+      "tokens": 90
+    },
+    {
+      "chunk_id": "weatherserver/main.go#009-type-weather",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "type weather",
+      "text": "type weather struct {\n\tTemp float64\n\tWind float64\n\tCode int\n}",
+      "tokens": 11
+    },
+    {
+      "chunk_id": "weatherserver/main.go#010-func-currentweather",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func currentWeather",
+      "text": "func currentWeather(ctx context.Context, lat, lon float64, units string) (weather, error) {\n\tq := url.Values{}\n\tq.Set(\"latitude\", strconv.FormatFloat(lat, 'f', 4, 64))\n\tq.Set(\"longitude\", strconv.FormatFloat(lon, 'f', 4, 64))\n\tq.Set(\"current\", \"temperature_2m,wind_speed_10m,weather_code\")\n\tq.Set(\"temperature_unit\", units)\n\tu := \"https://api.open-meteo.com/v1/forecast?\" + q.Encode()\n\n\tvar resp struct {\n\t\tCurrent struct {\n\t\t\tTemp float64 `json:\"temperature_2m\"`\n\t\t\tWind float64 `json:\"wind_speed_10m\"`\n\t\t\tCode int     `json:\"weather_code\"`\n\t\t} `json:\"current\"`\n\t}\n\tif err := getJSON(ctx, u, \u0026resp); err != nil {\n\t\treturn weather{}, err\n\t}\n\treturn weather{Temp: resp.Current.Temp, Wind: resp.Current.Wind, Code: resp.Current.Code}, nil\n}",
+      "tokens": 75
+    },
+    {
+      "chunk_id": "weatherserver/main.go#011-func-getjson",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func getJSON",
+      "text": "func getJSON(ctx context.Context, u string, dst any) error {\n\tctx, cancel := context.WithTimeout(ctx, 15*time.Second)\n\tdefer cancel()\n\treq, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)\n\tif err != nil {\n\t\treturn err\n\t}\n\treq.Header.Set(\"User-Agent\", userAgent)\n\tres, err := http.DefaultClient.Do(req)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer res.Body.Close()\n\tif res.StatusCode != http.StatusOK {\n\t\tbody, _ := io.ReadAll(io.LimitReader(res.Body, 512))\n\t\treturn fmt.Errorf(\"open-meteo вернул %d: %s\", res.StatusCode, strings.TrimSpace(string(body)))\n\t}\n\treturn json.NewDecoder(res.Body).Decode(dst)\n}",
+      "tokens": 68
+    },
+    {
+      "chunk_id": "weatherserver/main.go#012-func-weathercodetext",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func weatherCodeText",
+      "text": "// weatherCodeText — человекочитаемая расшифровка WMO weather_code.\nfunc weatherCodeText(code int) string {\n\tswitch {\n\tcase code == 0:\n\t\treturn \"ясно\"\n\tcase code \u003c= 3:\n\t\treturn \"переменная облачность\"\n\tcase code == 45 || code == 48:\n\t\treturn \"туман\"\n\tcase code \u003e= 51 \u0026\u0026 code \u003c= 57:\n\t\treturn \"морось\"\n\tcase code \u003e= 61 \u0026\u0026 code \u003c= 67:\n\t\treturn \"дождь\"\n\tcase code \u003e= 71 \u0026\u0026 code \u003c= 77:\n\t\treturn \"снег\"\n\tcase code \u003e= 80 \u0026\u0026 code \u003c= 82:\n\t\treturn \"ливень\"\n\tcase code \u003e= 95:\n\t\treturn \"гроза\"\n\tdefault:\n\t\treturn fmt.Sprintf(\"код погоды %d\", code)\n\t}\n}",
+      "tokens": 91
+    },
+    {
+      "chunk_id": "weatherserver/main.go#013-func-textresult",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func textResult",
+      "text": "func textResult(s string) *mcp.CallToolResult {\n\treturn \u0026mcp.CallToolResult{Content: []mcp.Content{\u0026mcp.TextContent{Text: s}}}\n}",
+      "tokens": 10
+    },
+    {
+      "chunk_id": "weatherserver/main.go#014-func-errresult",
+      "source": "weatherserver/main.go",
+      "file": "main.go",
+      "section": "func errResult",
+      "text": "func errResult(err error) *mcp.CallToolResult {\n\treturn \u0026mcp.CallToolResult{\n\t\tIsError: true,\n\t\tContent: []mcp.Content{\u0026mcp.TextContent{Text: \"ошибка: \" + err.Error()}},\n\t}\n}",
+      "tokens": 17
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#001-package-main",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#002-import",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "import",
+      "text": "import (\n\t\"context\"\n\t\"log\"\n\t\"sync\"\n\t\"time\"\n)",
+      "tokens": 7
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#003-type-scheduler",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "type Scheduler",
+      "text": "// Scheduler управляет фоновыми сборщиками: по одному на город (ключ — координаты).\n// При повторном Start для того же ключа старый сборщик останавливается (без дублей).\ntype Scheduler struct {\n\tmu      sync.Mutex\n\tbase    context.Context\n\tstore   *Store\n\tcancels map[string]context.CancelFunc\n}",
+      "tokens": 38
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#004-func-newscheduler",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "func NewScheduler",
+      "text": "func NewScheduler(base context.Context, store *Store) *Scheduler {\n\treturn \u0026Scheduler{base: base, store: store, cancels: map[string]context.CancelFunc{}}\n}",
+      "tokens": 15
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#005-func-scheduler-start",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "func Scheduler.Start",
+      "text": "// Start (пере)запускает сбор по городу: сразу + далее каждые IntervalSec секунд.\nfunc (s *Scheduler) Start(t *Tracked) {\n\tkey := t.key()\n\ts.mu.Lock()\n\tif cancel, ok := s.cancels[key]; ok {\n\t\tcancel() // останавливаем прежний сборщик этого города\n\t}\n\tctx, cancel := context.WithCancel(s.base)\n\ts.cancels[key] = cancel\n\ts.mu.Unlock()\n\n\tgo s.run(ctx, key, t)\n}",
+      "tokens": 50
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#006-func-scheduler-stop",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "func Scheduler.Stop",
+      "text": "// Stop останавливает сборщик по ключу.\nfunc (s *Scheduler) Stop(key string) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tif cancel, ok := s.cancels[key]; ok {\n\t\tcancel()\n\t\tdelete(s.cancels, key)\n\t}\n}",
+      "tokens": 27
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#007-func-scheduler-run",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "func Scheduler.run",
+      "text": "func (s *Scheduler) run(ctx context.Context, key string, t *Tracked) {\n\tcollect(ctx, s.store, key, t)\n\tiv := t.IntervalSec\n\tif iv \u003c= 0 {\n\t\tiv = 60\n\t}\n\tticker := time.NewTicker(time.Duration(iv) * time.Second)\n\tdefer ticker.Stop()\n\tfor {\n\t\tselect {\n\t\tcase \u003c-ctx.Done():\n\t\t\treturn\n\t\tcase \u003c-ticker.C:\n\t\t\tif !s.store.Has(key) { // город сняли с отслеживания — выходим\n\t\t\t\treturn\n\t\t\t}\n\t\t\tcollect(ctx, s.store, key, t)\n\t\t}\n\t}\n}",
+      "tokens": 61
+    },
+    {
+      "chunk_id": "weatherserver/scheduler.go#008-func-collect",
+      "source": "weatherserver/scheduler.go",
+      "file": "scheduler.go",
+      "section": "func collect",
+      "text": "func collect(ctx context.Context, store *Store, key string, t *Tracked) {\n\tw, err := currentWeather(ctx, t.Lat, t.Lon, \"celsius\")\n\tif err != nil {\n\t\tlog.Printf(\"[collector] %s: ошибка сбора: %v\", t.Name, err)\n\t\treturn\n\t}\n\tstore.Append(key, Sample{Time: time.Now(), Temp: w.Temp, Wind: w.Wind, Code: w.Code})\n\tlog.Printf(\"[collector] %s: %.1f°C записано\", t.Name, w.Temp)\n}",
+      "tokens": 47
+    },
+    {
+      "chunk_id": "weatherserver/store.go#001-package-main",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "package main",
+      "text": "package main",
+      "tokens": 2
+    },
+    {
+      "chunk_id": "weatherserver/store.go#002-import",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "import",
+      "text": "import (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n\t\"sync\"\n\t\"time\"\n)",
+      "tokens": 9
+    },
+    {
+      "chunk_id": "weatherserver/store.go#003-type-sample",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "type Sample",
+      "text": "type Sample struct {\n\tTime time.Time `json:\"time\"`\n\tTemp float64   `json:\"temp\"`\n\tWind float64   `json:\"wind\"`\n\tCode int       `json:\"code\"`\n}",
+      "tokens": 17
+    },
+    {
+      "chunk_id": "weatherserver/store.go#004-type-tracked",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "type Tracked",
+      "text": "type Tracked struct {\n\tLocation    string   `json:\"location\"` // как ввёл пользователь (для показа)\n\tName        string   `json:\"name\"`     // нормализованное имя из геокодера\n\tCountry     string   `json:\"country\"`\n\tLat         float64  `json:\"lat\"`\n\tLon         float64  `json:\"lon\"`\n\tIntervalSec int      `json:\"interval_sec\"`\n\tSamples     []Sample `json:\"samples\"`\n}",
+      "tokens": 37
+    },
+    {
+      "chunk_id": "weatherserver/store.go#005-func-tracked-key",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Tracked.key",
+      "text": "// key — канонический ключ города (координаты). Дедуп по нему.\nfunc (t *Tracked) key() string { return fmt.Sprintf(\"%.4f,%.4f\", t.Lat, t.Lon) }",
+      "tokens": 21
+    },
+    {
+      "chunk_id": "weatherserver/store.go#006-type-store",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "type Store",
+      "text": "type Store struct {\n\tmu      sync.Mutex\n\tpath    string\n\tTracked map[string]*Tracked `json:\"tracked\"`\n}",
+      "tokens": 12
+    },
+    {
+      "chunk_id": "weatherserver/store.go#007-func-loadstore",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func loadStore",
+      "text": "func loadStore(path string) *Store {\n\ts := \u0026Store{path: path, Tracked: map[string]*Tracked{}}\n\tdata, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn s\n\t}\n\tvar disk struct {\n\t\tTracked map[string]*Tracked `json:\"tracked\"`\n\t}\n\tif err := json.Unmarshal(data, \u0026disk); err == nil \u0026\u0026 disk.Tracked != nil {\n\t\ts.Tracked = disk.Tracked\n\t}\n\treturn s\n}",
+      "tokens": 51
+    },
+    {
+      "chunk_id": "weatherserver/store.go#008-func-store-savelocked",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.saveLocked",
+      "text": "func (s *Store) saveLocked() {\n\tdata, err := json.MarshalIndent(struct {\n\t\tTracked map[string]*Tracked `json:\"tracked\"`\n\t}{s.Tracked}, \"\", \"  \")\n\tif err != nil {\n\t\treturn\n\t}\n\ttmp := s.path + \".tmp\"\n\tif err := os.WriteFile(tmp, data, 0o644); err != nil {\n\t\treturn\n\t}\n\t_ = os.Rename(tmp, s.path)\n}",
+      "tokens": 46
+    },
+    {
+      "chunk_id": "weatherserver/store.go#009-func-store-upsert",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.Upsert",
+      "text": "// Upsert регистрирует/обновляет город по координатному ключу (сохраняя историю).\nfunc (s *Store) Upsert(t *Tracked) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tif old, ok := s.Tracked[t.key()]; ok {\n\t\tt.Samples = old.Samples\n\t}\n\ts.Tracked[t.key()] = t\n\ts.saveLocked()\n}",
+      "tokens": 34
+    },
+    {
+      "chunk_id": "weatherserver/store.go#010-func-store-append",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.Append",
+      "text": "// Append добавляет наблюдение по координатному ключу.\nfunc (s *Store) Append(key string, smp Sample) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tt, ok := s.Tracked[key]\n\tif !ok {\n\t\treturn\n\t}\n\tt.Samples = append(t.Samples, smp)\n\ts.saveLocked()\n}",
+      "tokens": 33
+    },
+    {
+      "chunk_id": "weatherserver/store.go#011-func-store-has",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.Has",
+      "text": "// Has сообщает, отслеживается ли ключ (для остановки осиротевших сборщиков).\nfunc (s *Store) Has(key string) bool {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\t_, ok := s.Tracked[key]\n\treturn ok\n}",
+      "tokens": 27
+    },
+    {
+      "chunk_id": "weatherserver/store.go#012-func-store-remove",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.Remove",
+      "text": "// Remove удаляет город по вводу/имени (без учёта регистра). Возвращает ключ и имя.\nfunc (s *Store) Remove(query string) (key, name string, ok bool) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tq := strings.ToLower(strings.TrimSpace(query))\n\tfor k, t := range s.Tracked {\n\t\tif strings.ToLower(t.Location) == q || strings.ToLower(t.Name) == q {\n\t\t\tdelete(s.Tracked, k)\n\t\t\ts.saveLocked()\n\t\t\treturn k, t.Name, true\n\t\t}\n\t}\n\treturn \"\", \"\", false\n}",
+      "tokens": 60
+    },
+    {
+      "chunk_id": "weatherserver/store.go#013-func-store-removeall",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.RemoveAll",
+      "text": "// RemoveAll очищает всё отслеживание. Возвращает число удалённых.\nfunc (s *Store) RemoveAll() int {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tn := len(s.Tracked)\n\ts.Tracked = map[string]*Tracked{}\n\ts.saveLocked()\n\treturn n\n}",
+      "tokens": 27
+    },
+    {
+      "chunk_id": "weatherserver/store.go#014-func-store-list",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.List",
+      "text": "func (s *Store) List() []*Tracked {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tout := make([]*Tracked, 0, len(s.Tracked))\n\tfor _, t := range s.Tracked {\n\t\tout = append(out, t)\n\t}\n\treturn out\n}",
+      "tokens": 29
+    },
+    {
+      "chunk_id": "weatherserver/store.go#015-func-store-summary",
+      "source": "weatherserver/store.go",
+      "file": "store.go",
+      "section": "func Store.Summary",
+      "text": "// Summary — агрегат. query пуст = по всем; иначе по совпадению ввода/имени.\nfunc (s *Store) Summary(query string) string {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\n\tpick := func(t *Tracked) string {\n\t\tn := len(t.Samples)\n\t\tif n == 0 {\n\t\t\treturn fmt.Sprintf(\"%s, %s: наблюдений пока нет (интервал %d с)\", t.Name, t.Country, t.IntervalSec)\n\t\t}\n\t\tmin, max, sum := t.Samples[0].Temp, t.Samples[0].Temp, 0.0\n\t\tfor _, smp := range t.Samples {\n\t\t\tif smp.Temp \u003c min {\n\t\t\t\tmin = smp.Temp\n\t\t\t}\n\t\t\tif smp.Temp \u003e max {\n\t\t\t\tmax = smp.Temp\n\t\t\t}\n\t\t\tsum += smp.Temp\n\t\t}\n\t\tfirst, last := t.Samples[0], t.Samples[n-1]\n\t\tspan := last.Time.Sub(first.Time).Round(time.Second)\n\t\treturn fmt.Sprintf(\n\t\t\t\"%s, %s: наблюдений %d за %s · t сейчас %.1f°C (min %.1f / avg %.1f / max %.1f) · обновление каждые %d с\",\n\t\t\tt.Name, t.Country, n, span, last.Temp, min, sum/float64(n), max, t.IntervalSec,\n\t\t)\n\t}\n\n\tif q := strings.ToLower(strings.TrimSpace(query)); q != \"\" {\n\t\tfor _, t := range s.Tracked {\n\t\t\tif strings.ToLower(t.Location) == q || strings.ToLower(t.Name) == q {\n\t\t\t\treturn pick(t)\n\t\t\t}\n\t\t}\n\t\treturn \"город не отслеживается: \" + query + \" (добавь через track_location)\"\n\t}\n\n\tif len(s.Tracked) == 0 {\n\t\treturn \"пока ничего не отслеживается — добавь город через track_location\"\n\t}\n\tout := \"Сводка по отслеживаемым городам:\\n\"\n\tfor _, t := range s.Tracked {\n\t\tout += \"  • \" + pick(t) + \"\\n\"\n\t}\n\treturn out\n}",
+      "tokens": 213
+    }
+  ]
+}
