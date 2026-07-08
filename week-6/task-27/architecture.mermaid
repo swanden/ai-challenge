@@ -1,0 +1,46 @@
+flowchart TB
+  U(["Пользователь / CLI"])
+
+  subgraph APP["Приложение: накопительный CLI-агент"]
+    direction TB
+    F1["Мини-чат · день 25<br/>chatAnswer + updateTaskMemory"]
+    F2["Рой ревьюеров · день 15<br/>Review + Orchestrate"]
+    F3["EnforceLLM<br/>проверка инвариантов"]
+    TL["MCP tool-use · день 17–20<br/>Agent.ask"]
+  end
+
+  subgraph SEAM["Шов Completer — тумблер: -backend cloud | local"]
+    direction TB
+    IF{{"Completer.Complete<br/>system + msgs → text, GenUsage"}}
+    CC["cloudCompleter<br/>anthropic.Client"]
+    LC["localCompleter<br/>LocalLLM · день 26"]
+  end
+
+  RET["Retrieval — локально<br/>nomic bi-encoder<br/>top-k + косинус-порог"]
+  IDX[("RAG-индекс<br/>русский корпус лекций")]
+  API[["Anthropic API — облако"]]
+  OLL[["Ollama :11434<br/>/api/chat · /api/embeddings"]]
+
+  U --> F1
+  U --> F2
+  U --> F3
+  U -.-> TL
+
+  F1 --> RET
+  RET --> IDX
+  RET -. "эмбеддинг запроса" .-> OLL
+
+  F1 --> IF
+  F2 --> IF
+  F3 --> IF
+  IF -- "cloud" --> CC
+  IF -- "local" --> LC
+  CC --> API
+  LC --> OLL
+
+  TL -. "tool-use остаётся облачным" .-> API
+
+  classDef cloud fill:#17233f,stroke:#5b8def,color:#eaeeff,stroke-width:1px
+  classDef local fill:#123029,stroke:#35b98a,color:#dffaf1,stroke-width:1px
+  class CC,API cloud
+  class LC,OLL,RET,IDX local
