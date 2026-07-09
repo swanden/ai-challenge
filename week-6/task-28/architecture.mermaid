@@ -1,0 +1,39 @@
+flowchart TB
+  Q(["Вопрос"])
+  RET["Retrieval — ЛОКАЛЬНО<br/>nomic bi-encoder + порог 0.35"]
+  IDX[("RAG-индекс · корпус недели 5")]
+  CTX["Общий контекст<br/>одни и те же чанки в оба бэкенда<br/>(сравниваем генерацию, не поиск)"]
+
+  LC["localCompleter → Ollama<br/>qwen2.5:7b"]
+  CC["cloudCompleter → Anthropic<br/>только как точка отсчёта (если есть ключ)"]
+  AL["Ответ локали"]
+  AC["Ответ облака"]
+
+  subgraph EVAL["Оценка"]
+    direction TB
+    SP["Скорость<br/>wall · выход-ток/с"]
+    QU["Качество<br/>облачный судья 1–5"]
+    ST["Стабильность<br/>K локальных прогонов<br/>лексич. Jaccard · разброс задержки"]
+  end
+
+  RES["РЕЗУЛЬТАТ<br/>RAG полностью локальный"]
+
+  Q --> RET
+  RET --> IDX
+  RET --> CTX
+  RET -. "эмбеддинг запроса" .-> LC
+  CTX --> LC
+  CTX --> CC
+  LC --> AL
+  CC --> AC
+  AL --> SP
+  AC --> SP
+  AL --> QU
+  AC --> QU
+  AL --> ST
+  EVAL --> RES
+
+  classDef cloud fill:#17233f,stroke:#5b8def,color:#eaeeff,stroke-width:1px
+  classDef local fill:#123029,stroke:#35b98a,color:#dffaf1,stroke-width:1px
+  class CC,AC cloud
+  class LC,AL,RET,IDX,CTX,RES local
