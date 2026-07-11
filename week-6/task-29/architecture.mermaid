@@ -1,0 +1,30 @@
+flowchart TB
+  Q(["Вопрос · RU-RAG кейс"])
+  RET["Retrieval — локально<br/>nomic + порог 0.35"]
+  CTX["Общий контекст (top-4)<br/>одни чанки в оба пресета"]
+
+  subgraph BEFORE["ДО (baseline)"]
+    direction TB
+    PB["temp 0.2 · num_predict 400<br/>num_ctx дефолт · промпт общий"]
+    AB["Ответ ДО<br/>короткий, сухой"]
+  end
+  subgraph AFTER["ПОСЛЕ (tuned)"]
+    direction TB
+    PA["temp 0.1 · num_predict 512<br/>num_ctx 8192 · промпт под кейс [n]"]
+    AA["Ответ ПОСЛЕ<br/>по делу, структурно, [n]"]
+  end
+
+  EVAL["Сравнение ДО→ПОСЛЕ<br/>качество (судья 1–5) · скорость (wall) · токены/ресурсы"]
+  RES["Оптимизированная локальная LLM<br/>под RU-RAG"]
+
+  Q --> RET --> CTX
+  CTX --> PB --> AB
+  CTX --> PA --> AA
+  AB --> EVAL
+  AA --> EVAL
+  EVAL --> RES
+
+  classDef before fill:#3a2417,stroke:#c8853a,color:#ffe8d0,stroke-width:1px
+  classDef after fill:#123029,stroke:#35b98a,color:#dffaf1,stroke-width:1px
+  class PB,AB before
+  class PA,AA,RES after
