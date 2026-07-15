@@ -1,4 +1,4 @@
-package task_32
+package main
 
 import (
 	"context"
@@ -136,6 +136,18 @@ func (a *Agent) gatherReviewContext(ctx context.Context, r *Retriever, files []F
 			continue
 		}
 		for _, h := range hits {
+			// День 32, косметика с живого прогона: для файла вроде badcode.go, у которого
+			// в корпусе нет близкой родни, реранк всё равно поднимает ЧТО-ТО (лучшее из
+			// худшего) — и нерелевантный чанк утекал в блок «Контекст из проекта» коммента.
+			// Отсекаем слабые хиты по порогу. Шкала зависит от того, был ли LLM-реранк:
+			// с реранком score = оценка 0–10, без — косинус 0–1 (тот же урок дня 27).
+			minScore := 5.0
+			if !perFile.Rerank {
+				minScore = 0.45
+			}
+			if h.Score < minScore {
+				continue
+			}
 			if seen[h.Chunk.ID] {
 				continue
 			}
@@ -145,7 +157,9 @@ func (a *Agent) gatherReviewContext(ctx context.Context, r *Retriever, files []F
 		}
 	}
 	if len(blocks) == 0 {
-		return "(в документации и коде проекта не нашлось релевантного контекста)", nil
+		// Нормальная ситуация для нового изолированного файла: релевантного контекста в
+		// проекте просто нет. Ревьюер разберёт diff по существу и без него.
+		return "(в документации и коде проекта не нашлось близкого контекста — ревьюю diff по существу)", nil
 	}
 	return strings.Join(blocks, "\n\n"), sources
 }

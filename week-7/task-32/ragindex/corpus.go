@@ -30,7 +30,11 @@ func loadCorpus(root string, exts, skipDirs []string, skipFile map[string]bool) 
 			if path == root { // сам корень не фильтруем (напр. -docs .)
 				return nil
 			}
-			if skipSet[strings.ToLower(d.Name())] || strings.HasPrefix(d.Name(), ".") {
+			// День 32, баг с живого прогона: Finder/IDE при копировании создаёт дубликаты
+			// каталогов вида "task-32 2", "ragcore 2". Они лежат ВНУТРИ корпуса и удваивают
+			// его (100 файлов вместо 50, мусорный источник "task-32 2/local26.go" в ревью).
+			// Отсекаем по признаку "<имя> <число>" — легитимных имён с таким паттерном у нас нет.
+			if skipSet[strings.ToLower(d.Name())] || strings.HasPrefix(d.Name(), ".") || isDupDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -58,6 +62,22 @@ func loadCorpus(root string, exts, skipDirs []string, skipFile map[string]bool) 
 	})
 	sort.Slice(docs, func(i, j int) bool { return docs[i].Rel < docs[j].Rel })
 	return docs, err
+}
+
+// isDupDir распознаёт дубликаты каталогов, которые создают Finder/IDE при
+// копировании: "task-32 2", "ragcore 3" — базовое имя, пробел, число в конце.
+// Такой каталог удваивает корпус, поэтому пропускаем его целиком.
+func isDupDir(name string) bool {
+	i := strings.LastIndexByte(name, ' ')
+	if i <= 0 || i == len(name)-1 {
+		return false
+	}
+	for _, r := range name[i+1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // isArtifact — собственные выходные файлы пайплайна; их не индексируем.

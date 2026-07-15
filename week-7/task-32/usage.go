@@ -1,4 +1,4 @@
-package task_32
+package main
 
 import "github.com/anthropics/anthropic-sdk-go"
 

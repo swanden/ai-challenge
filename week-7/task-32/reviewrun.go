@@ -1,4 +1,4 @@
-package task_32
+package main
 
 import (
 	"bytes"
@@ -35,32 +35,90 @@ type ReviewInput struct {
 }
 
 // runReview32 — локальный/демо-режим: diff из -diff-file или stdin, ревью в терминал.
-func runReview32(ctx context.Context, a *Agent, r *Retriever, cfg ReviewConfig, diffPath string) error {
+func runReview32(ctx context.Context, a *Agent, r *Retriever, cfg ReviewConfig, diffPath string, demo bool) error {
 	diff, err := readDiff(diffPath)
 	if err != nil {
 		return err
 	}
+	// Демо-режим для видео без озвучки: если diff не подали, берём встроенный образец
+	// с типовыми проблемами (пароль в лог, SQL-инъекция, игнор ошибки). Так одна
+	// команда `-review-demo` показывает весь пайплайн, ничего не готовя заранее.
 	if strings.TrimSpace(diff) == "" {
-		return fmt.Errorf("пустой diff (укажи -diff-file или подай diff в stdin)")
+		if demo {
+			diff = sampleBadDiff
+		} else {
+			return fmt.Errorf("пустой diff (укажи -diff-file или подай diff в stdin)")
+		}
 	}
 
 	ragBanner(0, "АВТОМАТИЗАЦИЯ РЕВЬЮ КОДА · день 32")
-	fmt.Println("Пайплайн: diff → RAG (документация + код проекта) → ревью.")
-	files := parseDiff(diff)
-	fmt.Printf("Файлов в diff: %d · %s\n", len(files), strings.Join(changedPaths(files), ", "))
-	fmt.Printf("Индекс корпуса: %s\n\n", r.Info())
+	fmt.Println("Пайплайн: PR diff → RAG (документация + код проекта) → LLM-ревьюер → severity.")
+	fmt.Println("Ревьюер — тот же агент (RAG-конвейер дней 21–31) + постинг в PR.")
 
+	// Шаг 1 — разбор diff (видно, что именно ревьюим)
+	files := parseDiff(diff)
+	ragBanner(1, "РАЗБОР DIFF")
+	for _, f := range files {
+		path := f.Path
+		if path == "" {
+			path = f.OldPath
+		}
+		tag := "изменён"
+		if f.IsNew {
+			tag = "новый файл"
+		} else if f.IsDeleted {
+			tag = "удалён"
+		}
+		fmt.Printf("  %s (%s, +%d/-%d строк)\n", path, tag, len(f.Added), len(f.Removed))
+	}
+	if demo {
+		fmt.Println("\n  Содержимое (встроенный образец с типовыми проблемами):")
+		for _, ln := range files[0].Added {
+			fmt.Printf("    + %s\n", ln)
+		}
+	}
+
+	// Шаг 2 — RAG (видно, что подключается контекст проекта)
+	ragBanner(2, "RAG: КОНТЕКСТ ПРОЕКТА")
+	fmt.Printf("  Индекс: %s\n", r.Info())
+	fmt.Println("  Под каждый изменённый файл строится запрос к корпусу (конвенции + смежный код).")
+
+	// Шаг 3 — само ревью
+	ragBanner(3, "РЕВЬЮ (LLM по diff + контекст проекта)")
 	rev, err := reviewPR(ctx, a, r, diff, cfg)
 	if err != nil {
 		return err
 	}
-
 	md := renderReviewMarkdown(rev, changedPaths(files))
 	fmt.Println(md)
-	fmt.Printf("\n[usage] вход %d · выход %d токенов · блокеров: %v\n",
-		rev.rawUsage.Input, rev.rawUsage.Output, rev.HasBlockers())
+
+	// Шаг 4 — итог (видно, что severity и блокеры работают)
+	ragBanner(4, "ИТОГ")
+	bugs, arch, sug := groupBySeverity(rev.Findings)
+	fmt.Printf("  Найдено замечаний: %d (🔴 баги: %d · 🟠 архитектура: %d · 🟡 рекомендации: %d)\n",
+		len(rev.Findings), len(bugs), len(arch), len(sug))
+	fmt.Printf("  Блокеры для CI (bug/architecture): %v\n", rev.HasBlockers())
+	fmt.Printf("  Токены: вход %d · выход %d\n", rev.rawUsage.Input, rev.rawUsage.Output)
+	if demo {
+		fmt.Println("\n  В реактивном режиме (GitHub Action) этот же текст уходит комментом в PR.")
+	}
 	return nil
 }
+
+// sampleBadDiff — встроенный образец для -review-demo: новый файл с типовыми
+// проблемами, которые ревьюер должен поймать (для немого видео).
+const sampleBadDiff = `diff --git a/week-7/task-32/badcode.go b/week-7/task-32/badcode.go
+new file mode 100644
+--- /dev/null
++++ b/week-7/task-32/badcode.go
+@@ -0,0 +1,6 @@
++package main
++import "database/sql"
++func BadLogin(db *sql.DB, user, pass string) {
++	println("login user=" + user + " pass=" + pass)
++	db.Query("SELECT * FROM users WHERE name='" + user + "'")
++}
+`
 
 // runReviewCI — реактивный режим внутри GitHub Action: diff из события, ревью
 // комментом в PR. Возвращает ошибку, если StrictCI и есть блокеры.

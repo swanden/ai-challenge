@@ -1,4 +1,4 @@
-package task_32
+package main
 
 import (
 	"bytes"

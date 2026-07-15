@@ -96,6 +96,7 @@ func main() {
 	serveConc := flag.Int("max-concurrent", 2, "день 30: одновременных генераций (стабильность)")
 	// День 32: автоматизация ревью кода.
 	review32 := flag.Bool("review32", false, "день 32: ревью diff'а в терминал (локально/демо). diff из -diff-file или stdin")
+	reviewDemo := flag.Bool("review-demo", false, "день 32: одна самодокументируемая команда для видео — ревью встроенного образца по шагам")
 	reviewCI := flag.Bool("review-ci", false, "день 32: реактивный режим для CI — ревью комментом в PR (нужны GITHUB_* env)")
 	diffFile := flag.String("diff-file", "", "день 32: путь к файлу с unified diff (пусто = читать stdin)")
 	reviewStrict := flag.Bool("review-strict", false, "день 32: провалить проверку (exit 1), если найдены баги/архитектурные проблемы")
@@ -352,7 +353,7 @@ func main() {
 
 	// День 32: ревью кода. Использует тот же индекс документации проекта (доки + код),
 	// что и /help — это и есть «RAG: документация + код» из задания.
-	if *review32 || *reviewCI {
+	if *review32 || *reviewCI || *reviewDemo {
 		revRetriever, err := NewRetriever(*indexDocs, *ollamaURL, *embedModel, *ragK)
 		if err != nil {
 			log.Fatalf("review32: %s\n\nсобери индекс:\n  go run ./%s/ragindex -out %s/ragindex-docs -ext .md,.go",
@@ -370,7 +371,7 @@ func main() {
 				log.Fatalf("review-ci: %s", err.Error())
 			}
 		} else {
-			if err := runReview32(ctx, agent, revRetriever, revConf, *diffFile); err != nil {
+			if err := runReview32(ctx, agent, revRetriever, revConf, *diffFile, *reviewDemo); err != nil {
 				log.Fatalf("review32: %s", err.Error())
 			}
 		}
