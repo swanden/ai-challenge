@@ -1,0 +1,86 @@
+# День 32. Реактивное AI-ревью кода.
+#
+# Триггер: открытие/обновление pull request. Внутри раннера (self-contained):
+#   1) checkout PR;
+#   2) сформировать diff (база PR ... голова PR);
+#   3) поднять Ollama с эмбеддером и переиспользовать предсобранный индекс, если он
+#      закоммичен; иначе собрать его в раннере;
+#   4) запустить наш ревьюер (-review-ci), который постит коммент в PR.
+#
+# Постинг — через встроенный secrets.GITHUB_TOKEN, никакого своего хостинга и туннеля.
+#
+# Разместить как .github/workflows/ai-review.yml в КОРНЕ репозитория ai-challenge.
+
+name: AI Review (day 32)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read          # читать код
+  pull-requests: write    # постить коммент в PR
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # нужна вся история, чтобы построить diff против базы
+
+      - name: Build diff (base...head)
+        id: diff
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          # Ревьюим только код и документацию нашего проекта на этой неделе.
+          git diff "$BASE".."$HEAD" -- 'week-7/task-32/**' > pr.diff || true
+          echo "changed=$(wc -l < pr.diff)" >> "$GITHUB_OUTPUT"
+          echo "--- diff (первые строки) ---"
+          head -40 pr.diff || true
+
+      - name: Skip if empty diff
+        if: steps.diff.outputs.changed == '0'
+        run: echo "В скоупе week-7/task-32 изменений нет — ревью не требуется."
+
+      - name: Setup Go
+        if: steps.diff.outputs.changed != '0'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+
+      - name: Setup Ollama (embedder)
+        if: steps.diff.outputs.changed != '0'
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull nomic-embed-text
+
+      - name: Ensure docs index
+        if: steps.diff.outputs.changed != '0'
+        run: |
+          # Долг дня 31 закрыт: индекс переиспользуется, если закоммичен.
+          # Строим заново ТОЛЬКО если его нет — «строить каждый раз избыточно» (Гладков).
+          if [ ! -f week-7/task-32/ragindex-docs/index-structural.json ]; then
+            echo "Индекс не найден — собираю (одноразово)."
+            go run ./week-7/task-32/ragindex \
+              -out week-7/task-32/ragindex-docs -ext .md,.go
+          else
+            echo "Индекс найден — переиспользую предсобранный."
+          fi
+
+      - name: AI review → PR comment
+        if: steps.diff.outputs.changed != '0'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          go run ./week-7/task-32 -review-ci \
+            -diff-file pr.diff \
+            -index-docs week-7/task-32/ragindex-docs/index-structural.json
+          # добавь -review-strict, чтобы блокеры (bug/architecture) валили проверку
