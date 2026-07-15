@@ -34,6 +34,10 @@ func sourceDir() string {
 	return "."
 }
 
+func Test() int {
+	return "str"
+}
+
 func main() {
 	reportMode := flag.Bool("report", false, "демонстрация (память + профили) и выход")
 	memDir := flag.String("mem", filepath.Join(sourceDir(), "memory"), "каталог памяти (short-term/working)")
