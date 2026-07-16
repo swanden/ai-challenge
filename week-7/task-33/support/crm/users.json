@@ -1,0 +1,49 @@
+[
+  {
+    "id": "u-1001",
+    "name": "Марина Ковалёва",
+    "email": "marina.k@example.com",
+    "plan": "free",
+    "devices": 2,
+    "storage_used_gb": 0.8,
+    "sso": "none",
+    "created_at": "2025-11-03",
+    "notes": "Активный пользователь, часто пишет по синхронизации"
+  },
+  {
+    "id": "u-1002",
+    "name": "Дмитрий Орлов",
+    "email": "d.orlov@corp-mail.example",
+    "plan": "pro",
+    "devices": 5,
+    "storage_used_gb": 12.4,
+    "sso": "google",
+    "two_factor": true,
+    "created_at": "2025-06-14",
+    "notes": "Корпоративная почта, ранее были задержки magic link"
+  },
+  {
+    "id": "u-1003",
+    "name": "Ольга Не́стерова",
+    "email": "olga.nesterova@example.com",
+    "plan": "team",
+    "role": "team_owner",
+    "team_size": 8,
+    "storage_used_gb": 340.0,
+    "sso": "none",
+    "created_at": "2024-09-20",
+    "notes": "Владелец команды из 8 человек"
+  },
+  {
+    "id": "u-1004",
+    "name": "Ivan Petrov",
+    "email": "ivan.petrov@example.com",
+    "plan": "pro",
+    "devices": 3,
+    "storage_used_gb": 48.9,
+    "sso": "apple",
+    "two_factor": false,
+    "created_at": "2025-01-30",
+    "notes": "Близко к лимиту хранилища Pro (50 ГБ)"
+  }
+]
