@@ -1,0 +1,29 @@
+flowchart TB
+  C(["Клиент по сети<br/>curl · OpenAI SDK · другой агент"])
+
+  subgraph SVC["Приватный сервис — наш код (:8080, 0.0.0.0)"]
+    direction TB
+    AUTH{"Bearer-ключ<br/>верный?"}
+    RL{"rate-limit<br/>N/мин на IP"}
+    SEM["семафор<br/>K одновременных генераций"]
+    MAP["хендлер: OpenAI-запрос ↔ LocalLLM<br/>num_ctx = max-context"]
+  end
+
+  E401["401 invalid_api_key"]
+  E429["429 rate_limit_exceeded"]
+  LLM["LocalLLM · день 26"]
+  OLL[["Ollama :11434 — локально"]]
+
+  C -->|"POST /v1/chat/completions"| AUTH
+  AUTH -->|нет| E401
+  AUTH -->|да| RL
+  RL -->|превышен| E429
+  RL -->|ok| SEM
+  SEM --> MAP --> LLM --> OLL
+  OLL -->|"chat.completion"| C
+  C -.->|"GET /health · без ключа"| SVC
+
+  classDef local fill:#123029,stroke:#35b98a,color:#dffaf1,stroke-width:1px
+  classDef err fill:#3a1a1a,stroke:#c0554e,color:#ffdede,stroke-width:1px
+  class LLM,OLL,MAP local
+  class E401,E429 err
