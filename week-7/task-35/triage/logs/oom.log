@@ -1,0 +1,7 @@
+2026-07-17T03:00:11Z INFO  starting export job id=export-8842 rows≈4200000
+2026-07-17T03:00:12Z INFO  loading all rows into memory for report
+2026-07-17T03:01:40Z INFO  memory usage 1.8GB / 2GB limit
+2026-07-17T03:02:03Z INFO  memory usage 1.98GB / 2GB limit
+[no stacktrace]
+kernel: Out of memory: Killed process 2231 (report-service) total-vm:2100000kB
+container exited: Reason: OOMKilled, ExitCode: 137

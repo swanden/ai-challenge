@@ -1,0 +1,4 @@
+2026-07-17T00:00:03Z INFO  calling payment provider https://pay.example.com/charge
+2026-07-17T00:00:03Z ERROR Post "https://pay.example.com/charge": tls: failed to verify certificate: x509: certificate has expired or is not yet valid: current time 2026-07-17T00:00:03Z is after 2026-07-16T23:59:59Z
+2026-07-17T00:00:04Z ERROR payment failed for order=55123: transport error
+2026-07-17T00:00:05Z ERROR Post "https://pay.example.com/charge": tls: failed to verify certificate: x509: certificate has expired

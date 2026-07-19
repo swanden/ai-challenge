@@ -1,0 +1,6 @@
+2026-07-17T09:14:22Z INFO  request started method=POST path=/api/orders
+2026-07-17T09:14:23Z WARN  slow query 1.2s SELECT * FROM orders WHERE user_id=$1
+2026-07-17T09:14:52Z ERROR failed to handle request: timeout acquiring connection from pool after 30s
+2026-07-17T09:14:52Z ERROR pgx: connection pool exhausted (in_use=20 max=20 waiting=47)
+2026-07-17T09:14:53Z ERROR failed to handle request: all connections in use
+2026-07-17T09:14:53Z INFO  db healthcheck OK (direct ping 4ms)

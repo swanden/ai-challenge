@@ -1,0 +1,3 @@
+2026-07-17T12:30:00Z INFO  cache warmup started
+2026-07-17T12:30:01Z ERROR unexpected token in config at line 42: expected ']' but found '}'
+2026-07-17T12:30:01Z FATAL config parse failed, refusing to start
